@@ -76,6 +76,48 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
   // Search filter for lists & Rekapitulasi table
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Editable Signature Information (stored in localStorage for convenience/durability)
+  const [kepsekName, setKepsekName] = useState<string>(() => {
+    return localStorage.getItem('rekap_kepsek_name') || 'Drs. H. Mulyono, M.Pd.';
+  });
+  const [kepsekNip, setKepsekNip] = useState<string>(() => {
+    return localStorage.getItem('rekap_kepsek_nip') || '19680514 199303 1 002';
+  });
+  const [signaturePlaceAndDate, setSignaturePlaceAndDate] = useState<string>(() => {
+    return localStorage.getItem('rekap_sig_date') || `Sleman, ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+  });
+  const [customTeacherName, setCustomTeacherName] = useState<string>(() => {
+    return localStorage.getItem('rekap_teacher_name') || session?.nama || 'Guru Kelas/Mapel';
+  });
+  const [teacherNip, setTeacherNip] = useState<string>(() => {
+    return localStorage.getItem('rekap_teacher_nip') || '19891204 201504 2 003';
+  });
+
+  const handleKepsekNameChange = (val: string) => {
+    setKepsekName(val);
+    localStorage.setItem('rekap_kepsek_name', val);
+  };
+
+  const handleKepsekNipChange = (val: string) => {
+    setKepsekNip(val);
+    localStorage.setItem('rekap_kepsek_nip', val);
+  };
+
+  const handleSignatureDateChange = (val: string) => {
+    setSignaturePlaceAndDate(val);
+    localStorage.setItem('rekap_sig_date', val);
+  };
+
+  const handleCustomTeacherNameChange = (val: string) => {
+    setCustomTeacherName(val);
+    localStorage.setItem('rekap_teacher_name', val);
+  };
+
+  const handleTeacherNipChange = (val: string) => {
+    setTeacherNip(val);
+    localStorage.setItem('rekap_teacher_nip', val);
+  };
+
   // Set default filters based on assigned classes and subjects
   useEffect(() => {
     if (assigned.classes.length > 0 && !activeClassId) {
@@ -651,13 +693,6 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                   Excel (.xlsx)
                 </button>
                 <button
-                  onClick={handleDownloadPDF}
-                  className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold text-rose-700 bg-rose-50 border border-rose-100 hover:bg-rose-100 transition-all rounded-xl shadow-xs cursor-pointer"
-                >
-                  <FileText className="w-4 h-4 text-rose-600" />
-                  Unduh PDF
-                </button>
-                <button
                   onClick={handlePrint}
                   className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 transition-all rounded-xl shadow-xs cursor-pointer"
                 >
@@ -1156,7 +1191,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
             {/* Left Column: Kepala Sekolah */}
             <div className="flex flex-col text-left">
               <p className="text-slate-400 dark:text-slate-500 print:text-slate-600">Mengetahui,</p>
-              <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black text-sm mt-0.5">Kepala Sekolah SD Merdeka</p>
+              <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black text-sm mt-0.5">Kepala Sekolah</p>
               
               {/* Space for stamp/signature */}
               <div className="h-24 flex items-center">
@@ -1165,18 +1200,37 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                 </div>
               </div>
               
-              <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black border-b border-slate-300 dark:border-slate-700 pb-0.5 inline-block min-w-[180px] print:border-black">
-                Drs. H. Mulyono, M.Pd.
-              </p>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono mt-1">NIP. 19680514 199303 1 002</p>
+              <div className="flex flex-col">
+                <input
+                  type="text"
+                  value={kepsekName}
+                  onChange={(e) => handleKepsekNameChange(e.target.value)}
+                  className="font-bold text-slate-800 dark:text-slate-200 print:text-black border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-hidden pb-0.5 min-w-[200px] print:border-none bg-transparent"
+                  placeholder="Nama Kepala Sekolah"
+                />
+                <div className="flex items-center gap-1 mt-1 print:mt-0.5">
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">NIP.</span>
+                  <input
+                    type="text"
+                    value={kepsekNip}
+                    onChange={(e) => handleKepsekNipChange(e.target.value)}
+                    className="text-[10px] text-slate-600 dark:text-slate-400 print:text-black font-mono border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-hidden min-w-[160px] print:border-none bg-transparent"
+                    placeholder="NIP Kepala Sekolah"
+                  />
+                </div>
+              </div>
             </div>
 
-            {/* Right Column: Guru Kelas / Pengampu */}
+            {/* Right Column: Guru Kelas/Mapel */}
             <div className="flex flex-col text-right items-end">
-              <p className="text-slate-400 dark:text-slate-500 print:text-slate-600">
-                Sleman, {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
-              </p>
-              <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black text-sm mt-0.5">Guru Pengampu</p>
+              <input
+                type="text"
+                value={signaturePlaceAndDate}
+                onChange={(e) => handleSignatureDateChange(e.target.value)}
+                className="text-slate-500 dark:text-slate-400 print:text-black border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-hidden pb-0.5 text-right font-sans text-xs min-w-[200px] print:border-none bg-transparent"
+                placeholder="Tempat, Tanggal"
+              />
+              <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black text-sm mt-0.5">Guru Kelas/Mapel</p>
               
               {/* Space for Signature */}
               <div className="h-24 flex items-center justify-end">
@@ -1186,12 +1240,25 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                 </div>
               </div>
               
-              <p className="font-bold text-indigo-600 dark:text-indigo-400 print:text-black border-b border-slate-300 dark:border-slate-700 pb-0.5 inline-block min-w-[180px] print:border-black">
-                {session?.nama || 'Guru Pengampu'}
-              </p>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono mt-1 text-right">
-                NIP. {teacher?.id ? '19891204 201504 2 003' : '...................................'}
-              </p>
+              <div className="flex flex-col items-end">
+                <input
+                  type="text"
+                  value={customTeacherName}
+                  onChange={(e) => handleCustomTeacherNameChange(e.target.value)}
+                  className="font-bold text-indigo-600 dark:text-indigo-400 print:text-black border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-hidden pb-0.5 text-right min-w-[200px] print:border-none bg-transparent"
+                  placeholder="Nama Guru"
+                />
+                <div className="flex items-center justify-end gap-1 mt-1 print:mt-0.5">
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono text-right">NIP.</span>
+                  <input
+                    type="text"
+                    value={teacherNip}
+                    onChange={(e) => handleTeacherNipChange(e.target.value)}
+                    className="text-[10px] text-slate-600 dark:text-slate-400 print:text-black font-mono border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-hidden min-w-[160px] print:border-none bg-transparent text-right"
+                    placeholder="NIP Guru"
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
