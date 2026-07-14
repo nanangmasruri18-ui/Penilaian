@@ -4,13 +4,15 @@ import {
 } from '../db';
 import { 
   Profile, Teacher, Class, Subject, Student, TeacherAssignment, 
-  AcademicYear, Semester, AuditLog 
+  AcademicYear, Semester, AuditLog, LearningObjective, MaterialScope,
+  FormativeScore, SummativeScopeScore, SemesterScore
 } from '../types';
 import { Modal } from './Modal';
 import { 
   Users, Layers, GraduationCap, BookOpen, Calendar, Clock, 
   Plus, Edit, Trash2, Search, ArrowUpDown, RefreshCw, Key, 
-  ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, FileText, Download
+  ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, FileText, Download,
+  Printer, FileSpreadsheet
 } from 'lucide-react';
 
 interface AdminModulesProps {
@@ -31,17 +33,93 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
   const [semesters, setSemesters] = useState<Semester[]>(() => db.getSemesters());
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => db.getAuditLogs());
 
+  // Additional grade ledger entities for rekapitulasi
+  const [tps, setTps] = useState<LearningObjective[]>(() => db.getLearningObjectives());
+  const [scopes, setScopes] = useState<MaterialScope[]>(() => db.getMaterialScopes());
+  const [formativeScores, setFormativeScores] = useState<FormativeScore[]>(() => db.getFormativeScores());
+  const [summativeScores, setSummativeScores] = useState<SummativeScopeScore[]>(() => db.getSummativeScopeScores());
+  const [semesterScores, setSemesterScores] = useState<SemesterScore[]>(() => db.getSemesterScores());
+
+  const [activeClassId, setActiveClassId] = useState<string>(() => {
+    const list = db.getClasses();
+    return list[0]?.id || '';
+  });
+  const [activeSubjectId, setActiveSubjectId] = useState<string>(() => {
+    const list = db.getSubjects();
+    return list[0]?.id || '';
+  });
+
+  // Current active Context (Year & Semester)
+  const context = useMemo(() => getActiveContext(), []);
+
+  // Editable Signature Information (stored in localStorage for convenience/durability, shared with teachers)
+  const [kepsekName, setKepsekName] = useState<string>(() => {
+    return localStorage.getItem('rekap_kepsek_name') || 'Drs. H. Mulyono, M.Pd.';
+  });
+  const [kepsekNip, setKepsekNip] = useState<string>(() => {
+    return localStorage.getItem('rekap_kepsek_nip') || '19680514 199303 1 002';
+  });
+  const [signaturePlaceAndDate, setSignaturePlaceAndDate] = useState<string>(() => {
+    return localStorage.getItem('rekap_sig_date') || `Sleman, ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+  });
+  const [customTeacherName, setCustomTeacherName] = useState<string>(() => {
+    return localStorage.getItem('rekap_teacher_name') || 'Guru Kelas/Mapel';
+  });
+  const [teacherNip, setTeacherNip] = useState<string>(() => {
+    return localStorage.getItem('rekap_teacher_nip') || '19891204 201504 2 003';
+  });
+
+  const handleKepsekNameChange = (val: string) => {
+    setKepsekName(val);
+    localStorage.setItem('rekap_kepsek_name', val);
+  };
+
+  const handleKepsekNipChange = (val: string) => {
+    setKepsekNip(val);
+    localStorage.setItem('rekap_kepsek_nip', val);
+  };
+
+  const handleSignatureDateChange = (val: string) => {
+    setSignaturePlaceAndDate(val);
+    localStorage.setItem('rekap_sig_date', val);
+  };
+
+  const handleCustomTeacherNameChange = (val: string) => {
+    setCustomTeacherName(val);
+    localStorage.setItem('rekap_teacher_name', val);
+  };
+
+  const handleTeacherNipChange = (val: string) => {
+    setTeacherNip(val);
+    localStorage.setItem('rekap_teacher_nip', val);
+  };
+
   // Helper to sync local state with db
   const syncState = () => {
     setTeachers(db.getTeachers());
     setProfiles(db.getProfiles());
-    setClasses(db.getClasses());
-    setSubjects(db.getSubjects());
+    const clList = db.getClasses();
+    setClasses(clList);
+    const subList = db.getSubjects();
+    setSubjects(subList);
     setStudents(db.getStudents());
     setAssignments(db.getAssignments());
     setAcademicYears(db.getAcademicYears());
     setSemesters(db.getSemesters());
     setAuditLogs(db.getAuditLogs());
+    setTps(db.getLearningObjectives());
+    setScopes(db.getMaterialScopes());
+    setFormativeScores(db.getFormativeScores());
+    setSummativeScores(db.getSummativeScopeScores());
+    setSemesterScores(db.getSemesterScores());
+
+    if (clList.length > 0 && !activeClassId) {
+      setActiveClassId(clList[0].id);
+    }
+    if (subList.length > 0 && !activeSubjectId) {
+      setActiveSubjectId(subList[0].id);
+    }
+
     onRefreshStats();
   };
 
@@ -666,6 +744,152 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
       return text.includes(searchQuery.toLowerCase());
     });
   }, [assignments, teachers, classes, subjects, searchQuery]);
+
+  // --- Admin Rekapitulasi Ledger Calculator ---
+  const rekapLedger = useMemo(() => {
+    if (!activeClassId || !activeSubjectId) return { headers: { tps: [], scopes: [] }, rows: [] };
+    
+    const semId = context.semester?.id || 'sem-ganjil';
+    const yrId = context.year?.id || 'th-2025';
+
+    // Find all TPs and Scopes for active class + subject
+    const subjectTps = tps.filter(t => t.class_id === activeClassId && t.subject_id === activeSubjectId);
+    const subjectScopes = scopes.filter(sc => sc.class_id === activeClassId && sc.subject_id === activeSubjectId);
+
+    // Get all students in the selected class
+    const classStudents = students.filter(s => s.kelas_id === activeClassId);
+
+    // Populate rows per student
+    const rows = classStudents.map((student, index) => {
+      // Find formative scores for each TP
+      const studentTpsScores = subjectTps.map(tp => {
+        const fScore = formativeScores.find(
+          s => s.student_id === student.id && 
+               s.tp_id === tp.id && 
+               s.semester === semId && 
+               s.tahun === yrId
+        );
+        return { tpId: tp.id, kode: tp.kode, nilai: fScore ? fScore.nilai : null };
+      });
+
+      // Calculate formative average
+      const validTpsScores = studentTpsScores.filter(s => s.nilai !== null) as { tpId: string; kode: string; nilai: number }[];
+      const formativeAverage = validTpsScores.length > 0
+        ? Math.round(validTpsScores.reduce((sum, current) => sum + current.nilai, 0) / validTpsScores.length)
+        : 0;
+
+      // Find summative scope scores for each scope
+      const studentScopeScores = subjectScopes.map(sc => {
+        const sScore = summativeScores.find(
+          s => s.student_id === student.id && 
+               s.lingkup_id === sc.id && 
+               s.semester === semId && 
+               s.tahun === yrId
+        );
+        return { scopeId: sc.id, nama: sc.nama, nilai: sScore ? sScore.nilai : null };
+      });
+
+      // Calculate summative scope average
+      const validScopeScores = studentScopeScores.filter(s => s.nilai !== null) as { scopeId: string; nama: string; nilai: number }[];
+      const scopeAverage = validScopeScores.length > 0
+        ? Math.round(validScopeScores.reduce((sum, current) => sum + current.nilai, 0) / validScopeScores.length)
+        : 0;
+
+      // Find Semester Score (SAS)
+      const sasObj = semesterScores.find(
+        s => s.student_id === student.id && 
+             s.subject_id === activeSubjectId && 
+             s.semester === semId && 
+             s.tahun === yrId
+      );
+      const sasScore = sasObj ? sasObj.nilai : null;
+
+      // Final Grade Calculation (Curriculum Merdeka weight standard: 40% Formatif, 40% Sumatif LM, 20% SAS)
+      const finalScore = Math.round(
+        (formativeAverage * 0.4) + 
+        (scopeAverage * 0.4) + 
+        ((sasScore || 0) * 0.2)
+      );
+
+      return {
+        no: index + 1,
+        studentId: student.id,
+        nisn: student.nisn,
+        nama: student.nama,
+        tpsScores: studentTpsScores,
+        formativeAverage,
+        scopeScores: studentScopeScores,
+        scopeAverage,
+        sasScore,
+        finalScore
+      };
+    }).filter(row => row.nama.toLowerCase().includes(searchQuery.toLowerCase()) || row.nisn.includes(searchQuery));
+
+    return {
+      headers: {
+        tps: subjectTps,
+        scopes: subjectScopes
+      },
+      rows
+    };
+  }, [activeClassId, activeSubjectId, students, tps, scopes, formativeScores, summativeScores, semesterScores, context, searchQuery]);
+
+  // Excel CSV exporter
+  const handleExportExcel = () => {
+    const clsName = classes.find(c => c.id === activeClassId)?.nama || 'Kelas';
+    const subName = subjects.find(s => s.id === activeSubjectId)?.nama || 'Mapel';
+    const fileName = `Rekap_Nilai_${clsName}_${subName}_Semester_${context.semester?.nama || 'Ganjil'}`;
+
+    // Standard headers
+    const headers = ['No', 'NISN', 'Nama Siswa'];
+    rekapLedger.headers.tps.forEach(tp => headers.push(tp.kode));
+    headers.push('Rata Formatif');
+    rekapLedger.headers.scopes.forEach((sc, idx) => headers.push(`LM ${idx + 1}`));
+    headers.push('Rata Sumatif LM');
+    headers.push('SAS');
+    headers.push('Nilai Akhir');
+
+    // Row construction
+    const rows = rekapLedger.rows.map(row => {
+      const cols = [row.no, row.nisn, row.nama];
+      row.tpsScores.forEach(sc => cols.push(sc.nilai !== null ? sc.nilai : '-'));
+      cols.push(row.formativeAverage);
+      row.scopeScores.forEach(sc => cols.push(sc.nilai !== null ? sc.nilai : '-'));
+      cols.push(row.scopeAverage);
+      cols.push(row.sasScore !== null ? row.sasScore : '-');
+      cols.push(row.finalScore);
+      return cols;
+    });
+
+    // Simple robust CSV with UTF8 BOM
+    const content = [
+      headers.join(','),
+      ...rows.map(row => row.map(val => {
+        const stringVal = String(val === undefined || val === null ? '' : val);
+        if (stringVal.includes(',') || stringVal.includes('"') || stringVal.includes('\n')) {
+          return `"${stringVal.replace(/"/g, '""')}"`;
+        }
+        return stringVal;
+      }).join(','))
+    ].join('\n');
+
+    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${fileName}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    addToast('success', 'Ekspor Excel Berhasil', `File CSV '${fileName}.csv' telah diunduh.`);
+  };
+
+  // Print report trigger (will print current Landscape A4 view)
+  const handlePrint = () => {
+    window.print();
+    addToast('info', 'Mencetak Dokumen', 'Halaman cetak/PDF sistem operasi telah dibuka.');
+  };
 
   // Paginated Slices
   const paginatedData = useMemo(() => {
@@ -1310,6 +1534,256 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* --- REKAPITULASI LEDGER ADMINISTRATOR --- */}
+      {currentTab === 'rekap' && (
+        <div className="space-y-6">
+          {/* FILTER PANEL FOR ADMIN (Select ANY Class and ANY Subject) */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between no-print">
+            <div className="flex flex-wrap gap-4 items-center w-full md:w-auto">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Pilih Kelas</label>
+                <select
+                  value={activeClassId}
+                  onChange={(e) => { setActiveClassId(e.target.value); syncState(); }}
+                  className="px-3.5 py-2 border border-slate-200 rounded-xl text-slate-700 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 font-medium"
+                >
+                  <option value="" disabled>-- Pilih Kelas --</option>
+                  {classes.map(c => (
+                    <option key={c.id} value={c.id}>{c.nama}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Pilih Mata Pelajaran</label>
+                <select
+                  value={activeSubjectId}
+                  onChange={(e) => { setActiveSubjectId(e.target.value); syncState(); }}
+                  className="px-3.5 py-2 border border-slate-200 rounded-xl text-slate-700 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 font-medium"
+                >
+                  <option value="" disabled>-- Pilih Mapel --</option>
+                  {subjects.map(s => (
+                    <option key={s.id} value={s.id}>{s.nama}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-2 w-full md:w-auto justify-end">
+              <button
+                onClick={handleExportExcel}
+                disabled={rekapLedger.rows.length === 0}
+                className="flex items-center justify-center gap-2 px-4 py-2 border border-slate-200 hover:border-indigo-500 text-slate-600 hover:text-indigo-600 font-semibold rounded-xl text-xs transition-all disabled:opacity-50 disabled:pointer-events-none bg-white cursor-pointer"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                Ekspor Excel
+              </button>
+              <button
+                onClick={handlePrint}
+                disabled={rekapLedger.rows.length === 0}
+                className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-850 text-white font-semibold rounded-xl text-xs transition-all shadow-md disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                Cetak Ledger
+              </button>
+            </div>
+          </div>
+
+          {/* TABLE CONTAINER */}
+          <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm print-container print-break-inside-avoid">
+            <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between no-print">
+              <div>
+                <h3 className="text-base font-bold text-slate-800">Lembar Rekapitulasi Nilai Siswa (Seluruh Kelas)</h3>
+                <p className="text-xs text-slate-500 mt-1">Sistem administrator memantau seluruh nilai formatif, sumatif lingkup materi, dan ujian akhir semester.</p>
+              </div>
+              
+              <div className="relative w-full md:max-w-xs">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                  <Search className="w-4 h-4" />
+                </div>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="block w-full pl-10 pr-4 py-2 border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm transition-all"
+                  placeholder="Cari siswa..."
+                />
+              </div>
+            </div>
+
+            {/* Printable Header (Visible only when printed) */}
+            <div className="hidden print-only p-6 text-center border-b border-slate-200 mb-6">
+              <h2 className="text-xl font-bold uppercase tracking-wide text-black">Rekapitulasi Nilai Peserta Didik SD</h2>
+              <p className="text-xs text-slate-600 mt-1">Kurikulum Merdeka Belajar • Tahun Pelajaran {context.year?.nama || '2025/2026'} ({context.semester?.nama || 'Ganjil'})</p>
+              <div className="grid grid-cols-2 text-left text-xs max-w-sm mx-auto mt-4 font-mono">
+                <span>Kelas: {classes.find(c => c.id === activeClassId)?.nama || '-'}</span>
+                <span>Administrator Sekolah</span>
+                <span>Mata Pelajaran: {subjects.find(s => s.id === activeSubjectId)?.nama || '-'}</span>
+                <span>Dicetak Pada: {new Date().toLocaleDateString('id-ID')}</span>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50 border-b border-slate-100">
+                    <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider w-12 text-center">No</th>
+                    <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider w-28">NISN</th>
+                    <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider min-w-[160px]">Nama Siswa</th>
+                    
+                    {/* Dynamic TP Columns */}
+                    {rekapLedger.headers.tps.map(tp => (
+                      <th key={tp.id} className="px-2 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-center bg-slate-50/20" title={tp.deskripsi}>
+                        {tp.kode}
+                      </th>
+                    ))}
+                    
+                    <th className="px-3 py-3 text-xs font-bold text-indigo-600 uppercase tracking-wider text-center bg-indigo-50/40">Rata Formatif</th>
+                    
+                    {/* Dynamic Scope Columns */}
+                    {rekapLedger.headers.scopes.map((sc, i) => (
+                      <th key={sc.id} className="px-2 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-center bg-slate-50/20" title={sc.nama}>
+                        LM {i + 1}
+                      </th>
+                    ))}
+
+                    <th className="px-3 py-3 text-xs font-bold text-indigo-600 uppercase tracking-wider text-center bg-indigo-50/40">Rata Sumatif LM</th>
+                    <th className="px-3 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider text-center bg-slate-50">SAS</th>
+                    <th className="px-4 py-3 text-xs font-bold text-indigo-800 uppercase tracking-wider text-center bg-indigo-100/50 font-display">Nilai Akhir</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {rekapLedger.rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={6 + rekapLedger.headers.tps.length + rekapLedger.headers.scopes.length} className="text-center py-10 text-slate-400 text-xs font-semibold">
+                        Belum ada siswa atau data nilai terinput untuk kelas dan mapel ini.
+                      </td>
+                    </tr>
+                  ) : (
+                    rekapLedger.rows.map((row) => (
+                      <tr key={row.studentId} className="hover:bg-slate-50/20 transition-colors">
+                        <td className="px-4 py-3.5 text-xs text-center font-mono text-slate-400">{row.no}</td>
+                        <td className="px-4 py-3.5 text-xs font-mono text-slate-500">{row.nisn}</td>
+                        <td className="px-4 py-3.5 text-xs font-bold text-slate-850">{row.nama}</td>
+                        
+                        {/* Formatives */}
+                        {row.tpsScores.map(score => (
+                          <td key={score.tpId} className="px-2 py-3.5 text-xs font-mono font-semibold text-center text-slate-600">
+                            {score.nilai !== null ? score.nilai : '-'}
+                          </td>
+                        ))}
+
+                        <td className="px-3 py-3.5 text-xs font-mono font-bold text-center text-indigo-700 bg-indigo-50/20">
+                          {row.formativeAverage}
+                        </td>
+
+                        {/* Summative Scopes */}
+                        {row.scopeScores.map(score => (
+                          <td key={score.scopeId} className="px-2 py-3.5 text-xs font-mono font-semibold text-center text-slate-600">
+                            {score.nilai !== null ? score.nilai : '-'}
+                          </td>
+                        ))}
+
+                        <td className="px-3 py-3.5 text-xs font-mono font-bold text-center text-indigo-700 bg-indigo-50/20">
+                          {row.scopeAverage}
+                        </td>
+
+                        {/* SAS */}
+                        <td className="px-3 py-3.5 text-xs font-mono font-bold text-center text-slate-700 bg-slate-50/30">
+                          {row.sasScore !== null ? row.sasScore : '-'}
+                        </td>
+
+                        {/* Final Combined Grade */}
+                        <td className="px-4 py-3.5 text-xs font-mono font-bold text-center bg-indigo-100/20 text-slate-900 border-l border-slate-100">
+                          <span className={`px-2 py-0.5 rounded ${row.finalScore >= 75 ? 'text-emerald-700 bg-emerald-50' : 'text-rose-600 bg-rose-50'}`}>
+                            {row.finalScore}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Tanda Tangan Guru Pengampu & Kepala Sekolah (Indonesian Signature Block) */}
+            <div className="mt-12 px-8 pb-8 flex flex-row justify-between items-start text-xs font-sans">
+              {/* Left Column: Kepala Sekolah */}
+              <div className="flex flex-col text-left">
+                <p className="text-slate-400 dark:text-slate-500 print:text-slate-600">Mengetahui,</p>
+                <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black text-sm mt-0.5">Kepala Sekolah</p>
+                
+                {/* Space for stamp/signature */}
+                <div className="h-24 flex items-center">
+                  <div className="text-[10px] italic text-slate-300 dark:text-slate-700 print:hidden select-none font-mono">
+                    ( Tanda Tangan & Stempel )
+                  </div>
+                </div>
+                
+                <div className="flex flex-col">
+                  <input
+                    type="text"
+                    value={kepsekName}
+                    onChange={(e) => handleKepsekNameChange(e.target.value)}
+                    className="font-bold text-slate-800 dark:text-slate-200 print:text-black border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-none pb-0.5 min-w-[200px] print:border-none bg-transparent"
+                    placeholder="Nama Kepala Sekolah"
+                  />
+                  <div className="flex items-center gap-1 mt-1 print:mt-0.5">
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">NIP.</span>
+                    <input
+                      type="text"
+                      value={kepsekNip}
+                      onChange={(e) => handleKepsekNipChange(e.target.value)}
+                      className="text-[10px] text-slate-600 dark:text-slate-400 print:text-black font-mono border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-none min-w-[160px] print:border-none bg-transparent"
+                      placeholder="NIP Kepala Sekolah"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Guru Kelas/Mapel */}
+              <div className="flex flex-col text-right items-end">
+                <input
+                  type="text"
+                  value={signaturePlaceAndDate}
+                  onChange={(e) => handleSignatureDateChange(e.target.value)}
+                  className="text-slate-500 dark:text-slate-400 print:text-black border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-none pb-0.5 text-right font-sans text-xs min-w-[200px] print:border-none bg-transparent"
+                  placeholder="Tempat, Tanggal"
+                />
+                <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black text-sm mt-0.5">Guru Kelas/Mapel</p>
+                
+                {/* Space for Signature */}
+                <div className="h-24 flex items-center justify-end">
+                  <div className="text-[10px] italic text-indigo-400/80 dark:text-indigo-500/50 print:hidden select-none font-mono tracking-wider rotate-[-2deg] border border-dashed border-indigo-200/50 dark:border-indigo-900/40 px-3 py-1 rounded">
+                    ( Tanda Tangan Basah )
+                  </div>
+                </div>
+                
+                <div className="flex flex-col items-end">
+                  <input
+                    type="text"
+                    value={customTeacherName}
+                    onChange={(e) => handleCustomTeacherNameChange(e.target.value)}
+                    className="font-bold text-indigo-600 dark:text-indigo-400 print:text-black border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-none pb-0.5 text-right min-w-[200px] print:border-none bg-transparent"
+                    placeholder="Nama Guru"
+                  />
+                  <div className="flex items-center gap-1 mt-1 print:mt-0.5 justify-end">
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">NIP.</span>
+                    <input
+                      type="text"
+                      value={teacherNip}
+                      onChange={(e) => handleTeacherNipChange(e.target.value)}
+                      className="text-[10px] text-slate-600 dark:text-slate-400 print:text-black font-mono border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-none text-right min-w-[160px] print:border-none bg-transparent"
+                      placeholder="NIP Guru"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

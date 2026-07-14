@@ -211,6 +211,7 @@ export default function App() {
     { id: 'academic-year', label: 'Tahun Pelajaran', icon: Calendar },
     { id: 'semester', label: 'Semester', icon: Clock },
     { id: 'assignment', label: 'Penugasan Guru', icon: Sliders },
+    { id: 'rekap', label: 'Rekapitulasi Nilai', icon: FileText },
     { id: 'logs', label: 'Log Aktivitas', icon: History }
   ];
 
