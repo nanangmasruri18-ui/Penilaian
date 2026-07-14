@@ -7,10 +7,12 @@ import {
   initializeDatabase, db, getActiveContext, getTeacherForUser, 
   getTeacherAssignedClassesAndSubjects, logAudit 
 } from './db';
+import { supabase, pullFromSupabase, pushToSupabase, getSyncStatus, SyncStatus } from './supabase';
 import { Login } from './components/Login';
 import { ToastContainer, ToastMessage, ToastType } from './components/Toast';
 import { AdminModules } from './components/AdminModules';
 import { GuruModules } from './components/GuruModules';
+import { SupabaseSync } from './components/SupabaseSync';
 import { 
   GraduationCap, LogOut, Sun, Moon, Menu, X, LayoutDashboard, 
   Users, Layers, BookOpen, Calendar, Clock, History, Settings, 
@@ -27,6 +29,7 @@ export default function App() {
     return localStorage.getItem('merdeka_theme') === 'dark';
   });
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(() => getSyncStatus());
 
   // Statistics State for Dynamic Dashboard counts
   const [stats, setStats] = useState({
@@ -51,6 +54,44 @@ export default function App() {
     }
 
     refreshStats();
+
+    // Auto-pull from Supabase on startup to sync the newest cloud state if table is active
+    const autoPullOnStart = async () => {
+      try {
+        const { data, error } = await supabase.from('merdeka_store').select('key').limit(1);
+        if (!error && data && data.length > 0) {
+          const success = await pullFromSupabase();
+          if (success) {
+            refreshStats();
+            const session = db.getSession();
+            if (session) setSessionUser(session);
+          }
+        }
+      } catch (err) {
+        console.warn('[Supabase Auto-Sync] Background pull skipped or failed.', err);
+      }
+    };
+
+    autoPullOnStart();
+
+    // Event listener for manual sync reload trigger and status change
+    const handleDbSynced = () => {
+      refreshStats();
+      const session = db.getSession();
+      setSessionUser(session);
+      setSyncStatus(getSyncStatus());
+    };
+
+    const handleSyncStatusChange = () => {
+      setSyncStatus(getSyncStatus());
+    };
+
+    window.addEventListener('merdeka_db_synced', handleDbSynced);
+    window.addEventListener('supabase_sync_changed', handleSyncStatusChange);
+    return () => {
+      window.removeEventListener('merdeka_db_synced', handleDbSynced);
+      window.removeEventListener('supabase_sync_changed', handleSyncStatusChange);
+    };
   }, []);
 
   // Sync theme to root class
@@ -201,6 +242,47 @@ export default function App() {
     });
   }, [stats]);
 
+  const handleSupabasePush = async () => {
+    const confirm = window.confirm('Apakah Anda yakin ingin MENGIRIM seluruh data lokal Anda ke Supabase? Tindakan ini akan menimpa data yang ada di cloud.');
+    if (!confirm) return;
+
+    const user = sessionUser ? sessionUser.nama : 'System';
+    logAudit(user, 'Memulai pengiriman (push) data lokal ke Supabase dari Dashboard.');
+    
+    const success = await pushToSupabase();
+    if (success) {
+      addToast('success', 'Sinkronisasi Berhasil', 'Data lokal Anda telah berhasil dicadangkan ke Supabase!');
+      logAudit(user, 'Sukses mengirim data lokal ke Supabase dari Dashboard.');
+      refreshStats();
+    } else {
+      const currentStatus = getSyncStatus();
+      addToast('error', 'Sinkronisasi Gagal', currentStatus.errorMessage || 'Gagal mengirim data.');
+      logAudit(user, `Gagal mengirim data ke Supabase dari Dashboard: ${currentStatus.errorMessage}`);
+    }
+  };
+
+  const handleSupabasePull = async () => {
+    const confirm = window.confirm('Apakah Anda yakin ingin MENARIK data dari Supabase? Data di aplikasi Anda saat ini akan sepenuhnya diganti oleh data dari cloud.');
+    if (!confirm) return;
+
+    const user = sessionUser ? sessionUser.nama : 'System';
+    logAudit(user, 'Memulai penarikan (pull) data dari Supabase dari Dashboard.');
+
+    const success = await pullFromSupabase();
+    if (success) {
+      addToast('success', 'Data Diunduh', 'Berhasil memperbarui database lokal dengan data dari Supabase!');
+      logAudit(user, 'Sukses mengunduh dan menerapkan data dari Supabase dari Dashboard.');
+      refreshStats();
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    } else {
+      const currentStatus = getSyncStatus();
+      addToast('error', 'Gagal Mengunduh', currentStatus.errorMessage || 'Gagal menarik data.');
+      logAudit(user, `Gagal menarik data dari Supabase dari Dashboard: ${currentStatus.errorMessage}`);
+    }
+  };
+
   // Sidebar navigations
   const adminMenuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -212,6 +294,7 @@ export default function App() {
     { id: 'semester', label: 'Semester', icon: Clock },
     { id: 'assignment', label: 'Penugasan Guru', icon: Sliders },
     { id: 'rekap', label: 'Rekapitulasi Nilai', icon: FileText },
+    { id: 'supabase', label: 'Database Supabase', icon: Database },
     { id: 'logs', label: 'Log Aktivitas', icon: History }
   ];
 
@@ -223,6 +306,7 @@ export default function App() {
     { id: 'summative-scope', label: 'Nilai Sumatif LM', icon: Flame },
     { id: 'sas', label: 'Nilai Sumatif Akhir', icon: Sparkles },
     { id: 'rekap', label: 'Rekapitulasi Nilai', icon: FileText },
+    { id: 'supabase', label: 'Database Supabase', icon: Database },
     { id: 'profil', label: 'Profil Saya', icon: User }
   ];
 
@@ -659,8 +743,13 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Render modules dynamically based on user role */}
-                  {sessionUser.role === 'Admin' ? (
+                  {/* Render modules dynamically based on user role or custom Supabase sync module */}
+                  {activeTab === 'supabase' ? (
+                    <SupabaseSync 
+                      addToast={addToast} 
+                      onRefreshStats={refreshStats} 
+                    />
+                  ) : sessionUser.role === 'Admin' ? (
                     <AdminModules 
                       currentTab={activeTab} 
                       addToast={addToast} 

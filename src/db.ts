@@ -4,6 +4,8 @@ import {
   SemesterScore, AcademicYear, Semester, AuditLog 
 } from './types';
 import * as seed from './seed';
+import { queueAutoPush } from './supabase';
+
 
 // Storage keys
 const KEYS = {
@@ -64,6 +66,8 @@ function get<T>(key: string, defaultValue: T): T {
 
 function set<T>(key: string, value: T): void {
   localStorage.setItem(key, JSON.stringify(value));
+  // Queue asynchronous background auto-save to Supabase
+  queueAutoPush(key, value);
 }
 
 // Log actions
