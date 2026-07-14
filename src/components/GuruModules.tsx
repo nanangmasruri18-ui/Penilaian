@@ -530,6 +530,18 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     addToast('info', 'Mencetak Dokumen', 'Halaman cetak/PDF sistem operasi telah dibuka.');
   };
 
+  // Download PDF helper with step-by-step guidance for saving as PDF
+  const handleDownloadPDF = () => {
+    addToast(
+      'info', 
+      'Menyiapkan PDF...', 
+      'Sila pilih tujuan "Simpan sebagai PDF" / "Save as PDF" dan pastikan Tata Letak disetel ke Lansekap (Landscape) pada jendela cetak.'
+    );
+    setTimeout(() => {
+      window.print();
+    }, 1000);
+  };
+
 
   return (
     <div className="space-y-6">
@@ -633,17 +645,24 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
               <>
                 <button
                   onClick={handleExportExcel}
-                  className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100 transition-all rounded-xl"
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100 transition-all rounded-xl shadow-xs cursor-pointer"
                 >
-                  <FileSpreadsheet className="w-4 h-4" />
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
                   Excel (.xlsx)
                 </button>
                 <button
-                  onClick={handlePrint}
-                  className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 transition-all rounded-xl"
+                  onClick={handleDownloadPDF}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold text-rose-700 bg-rose-50 border border-rose-100 hover:bg-rose-100 transition-all rounded-xl shadow-xs cursor-pointer"
                 >
-                  <Printer className="w-4 h-4" />
-                  Print / PDF
+                  <FileText className="w-4 h-4 text-rose-600" />
+                  Unduh PDF
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 transition-all rounded-xl shadow-xs cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-indigo-600" />
+                  Cetak Ledger
                 </button>
               </>
             )}
@@ -1130,6 +1149,50 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Tanda Tangan Guru Pengampu & Kepala Sekolah (Indonesian Signature Block) */}
+          <div className="mt-12 px-8 pb-8 flex flex-row justify-between items-start text-xs font-sans">
+            {/* Left Column: Kepala Sekolah */}
+            <div className="flex flex-col text-left">
+              <p className="text-slate-400 dark:text-slate-500 print:text-slate-600">Mengetahui,</p>
+              <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black text-sm mt-0.5">Kepala Sekolah SD Merdeka</p>
+              
+              {/* Space for stamp/signature */}
+              <div className="h-24 flex items-center">
+                <div className="text-[10px] italic text-slate-300 dark:text-slate-700 print:hidden select-none font-mono">
+                  ( Tanda Tangan & Stempel )
+                </div>
+              </div>
+              
+              <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black border-b border-slate-300 dark:border-slate-700 pb-0.5 inline-block min-w-[180px] print:border-black">
+                Drs. H. Mulyono, M.Pd.
+              </p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono mt-1">NIP. 19680514 199303 1 002</p>
+            </div>
+
+            {/* Right Column: Guru Kelas / Pengampu */}
+            <div className="flex flex-col text-right items-end">
+              <p className="text-slate-400 dark:text-slate-500 print:text-slate-600">
+                Sleman, {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+              </p>
+              <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black text-sm mt-0.5">Guru Pengampu</p>
+              
+              {/* Space for Signature */}
+              <div className="h-24 flex items-center justify-end">
+                {/* Visual indicator for handwritten signature */}
+                <div className="text-[10px] italic text-indigo-400/80 dark:text-indigo-500/50 print:hidden select-none font-mono tracking-wider rotate-[-2deg] border border-dashed border-indigo-200/50 dark:border-indigo-900/40 px-3 py-1 rounded">
+                  ( Tanda Tangan Basah )
+                </div>
+              </div>
+              
+              <p className="font-bold text-indigo-600 dark:text-indigo-400 print:text-black border-b border-slate-300 dark:border-slate-700 pb-0.5 inline-block min-w-[180px] print:border-black">
+                {session?.nama || 'Guru Pengampu'}
+              </p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono mt-1 text-right">
+                NIP. {teacher?.id ? '19891204 201504 2 003' : '...................................'}
+              </p>
+            </div>
           </div>
         </div>
       )}
