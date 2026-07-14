@@ -1,0 +1,1703 @@
+import React, { useState, useMemo } from 'react';
+import { 
+  db, logAudit, getActiveContext 
+} from '../db';
+import { 
+  Profile, Teacher, Class, Subject, Student, TeacherAssignment, 
+  AcademicYear, Semester, AuditLog 
+} from '../types';
+import { Modal } from './Modal';
+import { 
+  Users, Layers, GraduationCap, BookOpen, Calendar, Clock, 
+  Plus, Edit, Trash2, Search, ArrowUpDown, RefreshCw, Key, 
+  ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, FileText, Download
+} from 'lucide-react';
+
+interface AdminModulesProps {
+  currentTab: string;
+  addToast: (type: 'success' | 'error' | 'info', title: string, message: string) => void;
+  onRefreshStats: () => void;
+}
+
+export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast, onRefreshStats }) => {
+  // State for all database entities
+  const [teachers, setTeachers] = useState<Teacher[]>(() => db.getTeachers());
+  const [profiles, setProfiles] = useState<Profile[]>(() => db.getProfiles());
+  const [classes, setClasses] = useState<Class[]>(() => db.getClasses());
+  const [subjects, setSubjects] = useState<Subject[]>(() => db.getSubjects());
+  const [students, setStudents] = useState<Student[]>(() => db.getStudents());
+  const [assignments, setAssignments] = useState<TeacherAssignment[]>(() => db.getAssignments());
+  const [academicYears, setAcademicYears] = useState<AcademicYear[]>(() => db.getAcademicYears());
+  const [semesters, setSemesters] = useState<Semester[]>(() => db.getSemesters());
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => db.getAuditLogs());
+
+  // Helper to sync local state with db
+  const syncState = () => {
+    setTeachers(db.getTeachers());
+    setProfiles(db.getProfiles());
+    setClasses(db.getClasses());
+    setSubjects(db.getSubjects());
+    setStudents(db.getStudents());
+    setAssignments(db.getAssignments());
+    setAcademicYears(db.getAcademicYears());
+    setSemesters(db.getSemesters());
+    setAuditLogs(db.getAuditLogs());
+    onRefreshStats();
+  };
+
+  // --- Modal Forms State ---
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalType, setModalType] = useState<'add' | 'edit' | 'delete' | 'reset-pass'>('add');
+  const [targetEntity, setTargetEntity] = useState<string>(''); // 'teacher', 'class', 'student', etc.
+  const [selectedId, setSelectedId] = useState<string>('');
+
+  // Form Fields State
+  const [formData, setFormData] = useState<any>({});
+
+  // Sorting, Pagination, Search State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortField, setSortField] = useState('');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [filterClass, setFilterClass] = useState('all');
+  const itemsPerPage = 8;
+
+  // --- CSV / Excel Copy-Paste Importer State ---
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importClassId, setImportClassId] = useState('');
+  const [pasteData, setPasteData] = useState('');
+  const [parsedImportRows, setParsedImportRows] = useState<{ nisn: string; nama: string; valid: boolean; error?: string }[]>([]);
+
+  // Open modal helper
+  const openModal = (type: 'add' | 'edit' | 'delete' | 'reset-pass', entity: string, id: string = '', initialData: any = {}) => {
+    setModalType(type);
+    setTargetEntity(entity);
+    setSelectedId(id);
+    setFormData(initialData);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setFormData({});
+    setSelectedId('');
+  };
+
+  // Sorting Helper
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+    setCurrentPage(1);
+  };
+
+  // Submit Handler for Admin CRUD
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const activeUser = db.getSession()?.nama || 'Admin';
+
+    if (modalType === 'delete') {
+      // Execute Delete
+      if (targetEntity === 'teacher') {
+        const t = teachers.find(item => item.id === selectedId);
+        if (t) {
+          // Delete assignments associated
+          const updatedAsg = assignments.filter(a => a.teacher_id !== t.id);
+          db.setAssignments(updatedAsg);
+          
+          // Delete teacher
+          const updatedT = teachers.filter(item => item.id !== selectedId);
+          db.setTeachers(updatedT);
+
+          // Delete corresponding profile
+          const updatedP = profiles.filter(item => item.id !== t.user_id);
+          db.setProfiles(updatedP);
+
+          logAudit(activeUser, `Menghapus guru: ${t.nama} dan akun terkait.`);
+          addToast('success', 'Berhasil Dihapus', `Guru ${t.nama} telah berhasil dihapus.`);
+        }
+      } 
+      else if (targetEntity === 'class') {
+        const c = classes.find(item => item.id === selectedId);
+        if (c) {
+          // check if students exist in class
+          const countStudents = students.filter(s => s.kelas_id === c.id).length;
+          if (countStudents > 0) {
+            addToast('error', 'Hapus Gagal', `Kelas ${c.nama} masih memiliki ${countStudents} siswa. Kosongkan kelas terlebih dahulu.`);
+            closeModal();
+            return;
+          }
+
+          const updatedC = classes.filter(item => item.id !== selectedId);
+          db.setClasses(updatedC);
+          // Delete assignments for this class
+          const updatedAsg = assignments.filter(a => a.class_id !== c.id);
+          db.setAssignments(updatedAsg);
+
+          logAudit(activeUser, `Menghapus kelas: ${c.nama}`);
+          addToast('success', 'Berhasil Dihapus', `Kelas ${c.nama} telah berhasil dihapus.`);
+        }
+      } 
+      else if (targetEntity === 'subject') {
+        const s = subjects.find(item => item.id === selectedId);
+        if (s) {
+          const updatedS = subjects.filter(item => item.id !== selectedId);
+          db.setSubjects(updatedS);
+          // Delete assignments
+          const updatedAsg = assignments.filter(a => a.subject_id !== s.id);
+          db.setAssignments(updatedAsg);
+
+          logAudit(activeUser, `Menghapus mata pelajaran: ${s.nama}`);
+          addToast('success', 'Berhasil Dihapus', `Mata pelajaran ${s.nama} telah berhasil dihapus.`);
+        }
+      } 
+      else if (targetEntity === 'student') {
+        const s = students.find(item => item.id === selectedId);
+        if (s) {
+          const updatedS = students.filter(item => item.id !== selectedId);
+          db.setStudents(updatedS);
+
+          logAudit(activeUser, `Menghapus siswa: ${s.nama} (${s.nisn})`);
+          addToast('success', 'Berhasil Dihapus', `Siswa ${s.nama} telah berhasil dihapus.`);
+        }
+      }
+      else if (targetEntity === 'assignment') {
+        const a = assignments.find(item => item.id === selectedId);
+        if (a) {
+          const updatedA = assignments.filter(item => item.id !== selectedId);
+          db.setAssignments(updatedA);
+
+          const teacher = teachers.find(t => t.id === a.teacher_id);
+          const cls = classes.find(c => c.id === a.class_id);
+          const sub = subjects.find(s => s.id === a.subject_id);
+
+          logAudit(activeUser, `Menghapus penugasan mengajar: ${teacher?.nama || 'Guru'} di ${cls?.nama || 'Kelas'} (${sub?.nama || 'Mapel'})`);
+          addToast('success', 'Berhasil Dihapus', `Penugasan mengajar telah dihapus.`);
+        }
+      }
+      else if (targetEntity === 'academicYear') {
+        const y = academicYears.find(item => item.id === selectedId);
+        if (y) {
+          if (y.aktif) {
+            addToast('error', 'Hapus Gagal', `Tahun pelajaran yang sedang aktif tidak dapat dihapus.`);
+            closeModal();
+            return;
+          }
+          const updatedY = academicYears.filter(item => item.id !== selectedId);
+          db.setAcademicYears(updatedY);
+          logAudit(activeUser, `Menghapus tahun pelajaran: ${y.nama}`);
+          addToast('success', 'Berhasil Dihapus', `Tahun pelajaran ${y.nama} berhasil dihapus.`);
+        }
+      }
+      else if (targetEntity === 'semester') {
+        const s = semesters.find(item => item.id === selectedId);
+        if (s) {
+          if (s.aktif) {
+            addToast('error', 'Hapus Gagal', `Semester yang sedang aktif tidak dapat dihapus.`);
+            closeModal();
+            return;
+          }
+          const updatedS = semesters.filter(item => item.id !== selectedId);
+          db.setSemesters(updatedS);
+          logAudit(activeUser, `Menghapus semester: ${s.nama}`);
+          addToast('success', 'Berhasil Dihapus', `Semester ${s.nama} berhasil dihapus.`);
+        }
+      }
+
+      syncState();
+      closeModal();
+      return;
+    }
+
+    if (modalType === 'reset-pass') {
+      const p = profiles.find(item => item.id === selectedId);
+      if (p) {
+        logAudit(activeUser, `Melakukan reset kata sandi untuk guru: ${p.nama}`);
+        addToast('success', 'Sandi Direset', `Kata sandi akun ${p.nama} berhasil direset menjadi "guru123".`);
+      }
+      closeModal();
+      return;
+    }
+
+    // Add and Edit logic
+    if (targetEntity === 'teacher') {
+      const name = formData.nama?.trim();
+      const email = formData.email?.trim()?.toLowerCase();
+
+      if (!name || !email) {
+        addToast('error', 'Validasi Gagal', 'Nama dan Email guru wajib diisi.');
+        return;
+      }
+
+      if (modalType === 'add') {
+        // Email check duplicate
+        if (profiles.some(p => p.email.toLowerCase() === email)) {
+          addToast('error', 'Email Terdaftar', 'Email tersebut sudah digunakan akun lain.');
+          return;
+        }
+
+        const newProfileId = 'prof-' + Date.now();
+        const newTeacherId = 'tch-' + Date.now();
+
+        const newProfile: Profile = {
+          id: newProfileId,
+          nama: name,
+          role: 'Guru',
+          email: email
+        };
+
+        const newTeacher: Teacher = {
+          id: newTeacherId,
+          user_id: newProfileId,
+          nama: name
+        };
+
+        db.setProfiles([...profiles, newProfile]);
+        db.setTeachers([...teachers, newTeacher]);
+        logAudit(activeUser, `Menambahkan guru baru: ${name} (${email})`);
+        addToast('success', 'Guru Ditambahkan', `${name} berhasil ditambahkan.`);
+      } else {
+        // Edit teacher
+        const t = teachers.find(item => item.id === selectedId);
+        if (t) {
+          // Check email duplicate except self
+          const otherProfiles = profiles.filter(p => p.id !== t.user_id);
+          if (otherProfiles.some(p => p.email.toLowerCase() === email)) {
+            addToast('error', 'Email Terdaftar', 'Email tersebut sudah digunakan akun lain.');
+            return;
+          }
+
+          const updatedT = teachers.map(item => item.id === t.id ? { ...item, nama: name } : item);
+          const updatedP = profiles.map(item => item.id === t.user_id ? { ...item, nama: name, email: email } : item);
+
+          db.setTeachers(updatedT);
+          db.setProfiles(updatedP);
+          logAudit(activeUser, `Mengubah data guru: ${name} (${email})`);
+          addToast('success', 'Guru Diubah', `Profil guru ${name} berhasil diperbarui.`);
+        }
+      }
+    }
+
+    else if (targetEntity === 'class') {
+      const name = formData.nama?.trim();
+      if (!name) {
+        addToast('error', 'Validasi Gagal', 'Nama kelas wajib diisi.');
+        return;
+      }
+
+      if (modalType === 'add') {
+        if (classes.some(c => c.nama.toLowerCase() === name.toLowerCase())) {
+          addToast('error', 'Duplikasi Data', 'Nama kelas sudah terdaftar.');
+          return;
+        }
+        const newClass: Class = {
+          id: 'cls-' + Date.now(),
+          nama: name
+        };
+        db.setClasses([...classes, newClass]);
+        logAudit(activeUser, `Menambahkan kelas baru: ${name}`);
+        addToast('success', 'Kelas Ditambahkan', `Kelas ${name} berhasil didaftarkan.`);
+      } else {
+        const otherClasses = classes.filter(c => c.id !== selectedId);
+        if (otherClasses.some(c => c.nama.toLowerCase() === name.toLowerCase())) {
+          addToast('error', 'Duplikasi Data', 'Nama kelas sudah terdaftar.');
+          return;
+        }
+        const updatedC = classes.map(c => c.id === selectedId ? { ...c, nama: name } : c);
+        db.setClasses(updatedC);
+        logAudit(activeUser, `Mengubah kelas ke: ${name}`);
+        addToast('success', 'Kelas Diubah', `Nama kelas berhasil diubah menjadi ${name}.`);
+      }
+    }
+
+    else if (targetEntity === 'subject') {
+      const name = formData.nama?.trim();
+      if (!name) {
+        addToast('error', 'Validasi Gagal', 'Nama mata pelajaran wajib diisi.');
+        return;
+      }
+
+      if (modalType === 'add') {
+        if (subjects.some(s => s.nama.toLowerCase() === name.toLowerCase())) {
+          addToast('error', 'Duplikasi Data', 'Mata pelajaran sudah terdaftar.');
+          return;
+        }
+        const newSub: Subject = {
+          id: 'sub-' + Date.now(),
+          nama: name
+        };
+        db.setSubjects([...subjects, newSub]);
+        logAudit(activeUser, `Menambahkan mata pelajaran baru: ${name}`);
+        addToast('success', 'Mata Pelajaran Ditambahkan', `Mata pelajaran ${name} berhasil ditambahkan.`);
+      } else {
+        const otherSubjects = subjects.filter(s => s.id !== selectedId);
+        if (otherSubjects.some(s => s.nama.toLowerCase() === name.toLowerCase())) {
+          addToast('error', 'Duplikasi Data', 'Mata pelajaran sudah terdaftar.');
+          return;
+        }
+        const updatedS = subjects.map(s => s.id === selectedId ? { ...s, nama: name } : s);
+        db.setSubjects(updatedS);
+        logAudit(activeUser, `Mengubah mata pelajaran ke: ${name}`);
+        addToast('success', 'Mata Pelajaran Diubah', `Nama mata pelajaran berhasil diubah.`);
+      }
+    }
+
+    else if (targetEntity === 'student') {
+      const name = formData.nama?.trim();
+      const nisn = formData.nisn?.trim();
+      const classId = formData.kelas_id;
+
+      if (!name || !nisn || !classId) {
+        addToast('error', 'Validasi Gagal', 'NISN, Nama Lengkap, dan Kelas wajib diisi.');
+        return;
+      }
+
+      // NISN check length / digits
+      if (!/^\d{10}$/.test(nisn)) {
+        addToast('error', 'Validasi NISN', 'NISN wajib berisi tepat 10 digit angka.');
+        return;
+      }
+
+      if (modalType === 'add') {
+        if (students.some(s => s.nisn === nisn)) {
+          addToast('error', 'NISN Terdaftar', `Siswa dengan NISN ${nisn} sudah terdaftar di sistem.`);
+          return;
+        }
+        const newStudent: Student = {
+          id: 'std-' + Date.now(),
+          nisn: nisn,
+          nama: name,
+          kelas_id: classId
+        };
+        db.setStudents([...students, newStudent]);
+        logAudit(activeUser, `Mendaftarkan siswa baru: ${name} (${nisn})`);
+        addToast('success', 'Siswa Didaftarkan', `Siswa ${name} berhasil ditambahkan.`);
+      } else {
+        const otherStudents = students.filter(s => s.id !== selectedId);
+        if (otherStudents.some(s => s.nisn === nisn)) {
+          addToast('error', 'NISN Terdaftar', `Siswa dengan NISN ${nisn} sudah terdaftar.`);
+          return;
+        }
+        const updatedS = students.map(s => s.id === selectedId ? { ...s, nisn, nama: name, kelas_id: classId } : s);
+        db.setStudents(updatedS);
+        logAudit(activeUser, `Mengubah data siswa: ${name} (${nisn})`);
+        addToast('success', 'Siswa Diperbarui', `Data siswa berhasil diperbarui.`);
+      }
+    }
+
+    else if (targetEntity === 'assignment') {
+      const teacherId = formData.teacher_id;
+      const classId = formData.class_id;
+      const subjectId = formData.subject_id;
+
+      if (!teacherId || !classId || !subjectId) {
+        addToast('error', 'Validasi Gagal', 'Pilih Guru, Kelas, dan Mata Pelajaran.');
+        return;
+      }
+
+      // Duplicate assignment check
+      const isDuplicate = assignments.some(a => 
+        a.teacher_id === teacherId && a.class_id === classId && a.subject_id === subjectId
+      );
+
+      if (isDuplicate) {
+        addToast('error', 'Duplikasi Penugasan', 'Penugasan mengajar ini sudah terdaftar sebelumnya.');
+        return;
+      }
+
+      const newAsg: TeacherAssignment = {
+        id: 'asg-' + Date.now(),
+        teacher_id: teacherId,
+        class_id: classId,
+        subject_id: subjectId
+      };
+
+      db.setAssignments([...assignments, newAsg]);
+      const t = teachers.find(item => item.id === teacherId);
+      const c = classes.find(item => item.id === classId);
+      const s = subjects.find(item => item.id === subjectId);
+      logAudit(activeUser, `Menugaskan mengajar: ${t?.nama} mengajar ${s?.nama} di ${c?.nama}`);
+      addToast('success', 'Penugasan Berhasil', `Berhasil menugaskan ${t?.nama} mengajar ${s?.nama} di ${c?.nama}.`);
+    }
+
+    else if (targetEntity === 'academicYear') {
+      const name = formData.nama?.trim();
+      const active = formData.aktif === 'true' || formData.aktif === true;
+
+      if (!name) {
+        addToast('error', 'Validasi Gagal', 'Nama tahun pelajaran wajib diisi.');
+        return;
+      }
+
+      let updatedY = [...academicYears];
+      if (modalType === 'add') {
+        const newY: AcademicYear = {
+          id: 'th-' + Date.now(),
+          nama: name,
+          aktif: active
+        };
+        
+        if (active) {
+          // deactivate all others
+          updatedY = updatedY.map(y => ({ ...y, aktif: false }));
+        }
+        updatedY.push(newY);
+        db.setAcademicYears(updatedY);
+        logAudit(activeUser, `Menambahkan tahun pelajaran: ${name}`);
+        addToast('success', 'Tahun Pelajaran Ditambahkan', `Tahun pelajaran ${name} berhasil dibuat.`);
+      } else {
+        if (active) {
+          updatedY = updatedY.map(y => ({ ...y, aktif: y.id === selectedId }));
+        } else {
+          // If deactivated, we must verify at least one remains active
+          const willHaveActive = updatedY.some(y => y.id !== selectedId && y.aktif);
+          if (!willHaveActive) {
+            addToast('error', 'Konfigurasi Tidak Sah', 'Minimal harus ada satu tahun pelajaran aktif.');
+            return;
+          }
+          updatedY = updatedY.map(y => y.id === selectedId ? { ...y, nama: name, aktif: false } : y);
+        }
+        db.setAcademicYears(updatedY);
+        logAudit(activeUser, `Mengubah konfigurasi tahun pelajaran: ${name}`);
+        addToast('success', 'Pengaturan Disimpan', `Konfigurasi Tahun Pelajaran berhasil diperbarui.`);
+      }
+    }
+
+    else if (targetEntity === 'semester') {
+      const name = formData.nama?.trim();
+      const active = formData.aktif === 'true' || formData.aktif === true;
+
+      if (!name) {
+        addToast('error', 'Validasi Gagal', 'Nama semester wajib diisi.');
+        return;
+      }
+
+      let updatedS = [...semesters];
+      if (modalType === 'add') {
+        const newS: Semester = {
+          id: 'sem-' + Date.now(),
+          nama: name,
+          aktif: active
+        };
+        if (active) {
+          updatedS = updatedS.map(s => ({ ...s, aktif: false }));
+        }
+        updatedS.push(newS);
+        db.setSemesters(updatedS);
+        logAudit(activeUser, `Menambahkan semester baru: ${name}`);
+        addToast('success', 'Semester Ditambahkan', `Semester ${name} berhasil dibuat.`);
+      } else {
+        if (active) {
+          updatedS = updatedS.map(s => ({ ...s, aktif: s.id === selectedId }));
+        } else {
+          const willHaveActive = updatedS.some(s => s.id !== selectedId && s.aktif);
+          if (!willHaveActive) {
+            addToast('error', 'Konfigurasi Tidak Sah', 'Minimal harus ada satu semester aktif.');
+            return;
+          }
+          updatedS = updatedS.map(s => s.id === selectedId ? { ...s, nama: name, aktif: false } : s);
+        }
+        db.setSemesters(updatedS);
+        logAudit(activeUser, `Mengubah konfigurasi semester ke: ${name}`);
+        addToast('success', 'Pengaturan Disimpan', `Konfigurasi Semester berhasil diperbarui.`);
+      }
+    }
+
+    syncState();
+    closeModal();
+  };
+
+  // --- CSV Student Importer Logic ---
+  const handleParseImport = () => {
+    if (!pasteData.trim()) {
+      addToast('error', 'Gagal', 'Sila tempelkan teks (NISN & Nama) dari Excel terlebih dahulu.');
+      return;
+    }
+
+    const lines = pasteData.split('\n');
+    const parsed: typeof parsedImportRows = [];
+
+    lines.forEach((line) => {
+      if (!line.trim()) return;
+      
+      // Support Tab (\t), semicolon (;), comma (,) separators
+      let parts = line.split('\t');
+      if (parts.length < 2) parts = line.split(';');
+      if (parts.length < 2) parts = line.split(',');
+
+      if (parts.length < 2) {
+        parsed.push({
+          nisn: '',
+          nama: line.trim(),
+          valid: false,
+          error: 'Format baris tidak dikenal. Wajib ada pemisah Tab, Koma, atau Titik Koma.'
+        });
+        return;
+      }
+
+      const rawNisn = parts[0].trim().replace(/\s+/g, '');
+      const rawNama = parts.slice(1).join(' ').trim();
+
+      // Check validation
+      const isDigitOnly = /^\d+$/.test(rawNisn);
+      const isTenDigit = rawNisn.length === 10;
+      const isNisnTaken = students.some(s => s.nisn === rawNisn) || parsed.some(p => p.nisn === rawNisn);
+
+      let valid = true;
+      let error = '';
+
+      if (!rawNisn) {
+        valid = false;
+        error = 'NISN kosong.';
+      } else if (!isDigitOnly) {
+        valid = false;
+        error = 'NISN harus berupa angka.';
+      } else if (!isTenDigit) {
+        valid = false;
+        error = 'NISN wajib tepat 10 digit.';
+      } else if (isNisnTaken) {
+        valid = false;
+        error = 'NISN sudah ada di database/daftar.';
+      }
+
+      if (!rawNama) {
+        valid = false;
+        error = 'Nama siswa kosong.';
+      }
+
+      parsed.push({
+        nisn: rawNisn,
+        nama: rawNama,
+        valid,
+        error: error || undefined
+      });
+    });
+
+    setParsedImportRows(parsed);
+    addToast('info', 'Data Terurai', `Berhasil menguraikan ${parsed.length} baris data.`);
+  };
+
+  const handleCommitImport = () => {
+    if (parsedImportRows.length === 0) {
+      addToast('error', 'Gagal', 'Belum ada data tervalidasi yang siap diimpor.');
+      return;
+    }
+
+    if (!importClassId) {
+      addToast('error', 'Pilih Kelas', 'Pilih kelas tujuan untuk seluruh siswa ini.');
+      return;
+    }
+
+    const validRows = parsedImportRows.filter(r => r.valid);
+    if (validRows.length === 0) {
+      addToast('error', 'Gagal', 'Tidak ada baris data valid yang dapat disimpan.');
+      return;
+    }
+
+    const newStudents: Student[] = validRows.map(row => ({
+      id: 'std-' + Date.now() + Math.random().toString(36).substr(2, 4),
+      nisn: row.nisn,
+      nama: row.nama,
+      kelas_id: importClassId
+    }));
+
+    const updatedStudents = [...students, ...newStudents];
+    db.setStudents(updatedStudents);
+    
+    const activeUser = db.getSession()?.nama || 'Admin';
+    const clsName = classes.find(c => c.id === importClassId)?.nama || 'Kelas';
+    logAudit(activeUser, `Melakukan impor massal ${newStudents.length} siswa ke ${clsName}`);
+    addToast('success', 'Impor Sukses', `Berhasil memasukkan ${newStudents.length} siswa ke ${clsName}.`);
+
+    // Reset importer states
+    setPasteData('');
+    setParsedImportRows([]);
+    setImportClassId('');
+    setIsImportModalOpen(false);
+    syncState();
+  };
+
+  const loadSampleTemplate = () => {
+    setPasteData(
+      "0018374920\tAhmad Fathoni\n" +
+      "0019283741\tBalqis Syahira\n" +
+      "0012938475\tCakra Baskara\n" +
+      "0010928374\tDea Ananda\n" +
+      "0017482930\tEdo Prasetyo"
+    );
+    addToast('info', 'Template Dimuat', 'Contoh data terisi ke kotak teks.');
+  };
+
+  // Filter & Search Logic for different lists
+  const filteredTeachers = useMemo(() => {
+    return teachers.filter(t => {
+      const email = profiles.find(p => p.id === t.user_id)?.email || '';
+      return t.nama.toLowerCase().includes(searchQuery.toLowerCase()) || 
+             email.toLowerCase().includes(searchQuery.toLowerCase());
+    });
+  }, [teachers, profiles, searchQuery]);
+
+  const filteredStudents = useMemo(() => {
+    return students.filter(s => {
+      const matchSearch = s.nama.toLowerCase().includes(searchQuery.toLowerCase()) || s.nisn.includes(searchQuery);
+      const matchClass = filterClass === 'all' || s.kelas_id === filterClass;
+      return matchSearch && matchClass;
+    });
+  }, [students, searchQuery, filterClass]);
+
+  const filteredClasses = useMemo(() => {
+    return classes.filter(c => c.nama.toLowerCase().includes(searchQuery.toLowerCase()));
+  }, [classes, searchQuery]);
+
+  const filteredSubjects = useMemo(() => {
+    return subjects.filter(s => s.nama.toLowerCase().includes(searchQuery.toLowerCase()));
+  }, [subjects, searchQuery]);
+
+  const filteredAssignments = useMemo(() => {
+    return assignments.filter(a => {
+      const teacherName = teachers.find(t => t.id === a.teacher_id)?.nama || '';
+      const className = classes.find(c => c.id === a.class_id)?.nama || '';
+      const subjectName = subjects.find(s => s.id === a.subject_id)?.nama || '';
+      const text = `${teacherName} ${className} ${subjectName}`.toLowerCase();
+      return text.includes(searchQuery.toLowerCase());
+    });
+  }, [assignments, teachers, classes, subjects, searchQuery]);
+
+  // Paginated Slices
+  const paginatedData = useMemo(() => {
+    let currentSet: any[] = [];
+    if (currentTab === 'guru') currentSet = filteredTeachers;
+    else if (currentTab === 'kelas') currentSet = filteredClasses;
+    else if (currentTab === 'siswa') currentSet = filteredStudents;
+    else if (currentTab === 'subject') currentSet = filteredSubjects;
+    else if (currentTab === 'assignment') currentSet = filteredAssignments;
+    else if (currentTab === 'academic-year') currentSet = academicYears;
+    else if (currentTab === 'semester') currentSet = semesters;
+    else if (currentTab === 'logs') currentSet = auditLogs;
+
+    // Sorting implementation
+    if (sortField) {
+      currentSet = [...currentSet].sort((a: any, b: any) => {
+        let valA = a[sortField] || '';
+        let valB = b[sortField] || '';
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+        
+        if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+        if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return {
+      data: currentSet.slice(startIndex, startIndex + itemsPerPage),
+      totalItems: currentSet.length,
+      totalPages: Math.ceil(currentSet.length / itemsPerPage) || 1
+    };
+  }, [currentTab, filteredTeachers, filteredClasses, filteredStudents, filteredSubjects, filteredAssignments, academicYears, semesters, auditLogs, sortField, sortDirection, currentPage]);
+
+
+  return (
+    <div className="space-y-6">
+      {/* Search and Filters Header */}
+      {currentTab !== 'logs' && currentTab !== 'dashboard' && (
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col md:flex-row gap-4 justify-between items-center no-print">
+          <div className="relative w-full md:max-w-xs">
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+              <Search className="w-4 h-4" />
+            </div>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+              className="block w-full pl-10 pr-4 py-2 border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm transition-all"
+              placeholder={`Cari ${currentTab === 'guru' ? 'guru...' : currentTab === 'siswa' ? 'siswa...' : 'data...'}`}
+            />
+          </div>
+
+          <div className="flex flex-wrap gap-2 w-full md:w-auto justify-end">
+            {/* Filter Class only for Student Tab */}
+            {currentTab === 'siswa' && (
+              <select
+                value={filterClass}
+                onChange={(e) => { setFilterClass(e.target.value); setCurrentPage(1); }}
+                className="px-3 py-2 border border-slate-200 rounded-xl text-slate-700 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500"
+              >
+                <option value="all">Semua Kelas</option>
+                {classes.map(c => (
+                  <option key={c.id} value={c.id}>{c.nama}</option>
+                ))}
+              </select>
+            )}
+
+            {/* Quick Action Buttons */}
+            {currentTab === 'siswa' && (
+              <button
+                onClick={() => {
+                  setParsedImportRows([]);
+                  setPasteData('');
+                  setImportClassId('');
+                  setIsImportModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all rounded-xl shadow-sm border border-slate-200"
+              >
+                <Upload className="w-4 h-4" />
+                Impor Massal (Excel)
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                if (currentTab === 'guru') openModal('add', 'teacher');
+                else if (currentTab === 'kelas') openModal('add', 'class');
+                else if (currentTab === 'siswa') openModal('add', 'student', '', { kelas_id: classes[0]?.id || '' });
+                else if (currentTab === 'subject') openModal('add', 'subject');
+                else if (currentTab === 'assignment') openModal('add', 'assignment', '', { teacher_id: teachers[0]?.id || '', class_id: classes[0]?.id || '', subject_id: subjects[0]?.id || '' });
+                else if (currentTab === 'academic-year') openModal('add', 'academicYear', '', { aktif: 'false' });
+                else if (currentTab === 'semester') openModal('add', 'semester', '', { aktif: 'false' });
+              }}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-all rounded-xl shadow-md shadow-indigo-100"
+            >
+              <Plus className="w-4 h-4" />
+              Tambah Data
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* --- GURU PANEL --- */}
+      {currentTab === 'guru' && (
+        <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th onClick={() => handleSort('nama')} className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider cursor-pointer hover:bg-slate-100 transition-colors">
+                    <div className="flex items-center gap-1">Nama Guru <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                  </th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Email Akun</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Role Hak Akses</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {paginatedData.data.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="text-center py-10 text-slate-400 text-sm">Tidak ada guru ditemukan.</td>
+                  </tr>
+                ) : (
+                  paginatedData.data.map((t: Teacher) => {
+                    const prof = profiles.find(p => p.id === t.user_id);
+                    return (
+                      <tr key={t.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-4 text-sm font-semibold text-slate-800">{t.nama}</td>
+                        <td className="px-6 py-4 text-sm font-mono text-slate-500">{prof?.email || '-'}</td>
+                        <td className="px-6 py-4 text-sm">
+                          <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">
+                            {prof?.role || 'Guru'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => openModal('reset-pass', 'teacher', prof?.id || '')}
+                              title="Reset Password"
+                              className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-all rounded-xl"
+                            >
+                              <Key className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => openModal('edit', 'teacher', t.id, { nama: t.nama, email: prof?.email || '' })}
+                              title="Ubah Profil"
+                              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all rounded-xl"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => openModal('delete', 'teacher', t.id)}
+                              title="Hapus Guru"
+                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all rounded-xl"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+          {/* Pagination */}
+          {paginatedData.totalItems > itemsPerPage && (
+            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+              <span className="text-xs text-slate-500">Menampilkan {paginatedData.data.length} dari {paginatedData.totalItems} guru.</span>
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => p - 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-semibold text-slate-700 px-3">{currentPage} / {paginatedData.totalPages}</span>
+                <button
+                  disabled={currentPage === paginatedData.totalPages}
+                  onClick={() => setCurrentPage(p => p + 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* --- KELAS PANEL --- */}
+      {currentTab === 'kelas' && (
+        <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th onClick={() => handleSort('nama')} className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider cursor-pointer hover:bg-slate-100 transition-colors">
+                    <div className="flex items-center gap-1">Nama Kelas <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                  </th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Jumlah Siswa</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {paginatedData.data.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="text-center py-10 text-slate-400 text-sm">Tidak ada kelas ditemukan.</td>
+                  </tr>
+                ) : (
+                  paginatedData.data.map((c: Class) => {
+                    const studentCount = students.filter(s => s.kelas_id === c.id).length;
+                    return (
+                      <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-4 text-sm font-semibold text-slate-800">{c.nama}</td>
+                        <td className="px-6 py-4 text-sm text-slate-500 font-mono">{studentCount} Siswa</td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => openModal('edit', 'class', c.id, { nama: c.nama })}
+                              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all rounded-xl"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => openModal('delete', 'class', c.id)}
+                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all rounded-xl"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+          {/* Pagination */}
+          {paginatedData.totalItems > itemsPerPage && (
+            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+              <span className="text-xs text-slate-500">Menampilkan {paginatedData.data.length} dari {paginatedData.totalItems} kelas.</span>
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => p - 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-semibold text-slate-700 px-3">{currentPage} / {paginatedData.totalPages}</span>
+                <button
+                  disabled={currentPage === paginatedData.totalPages}
+                  onClick={() => setCurrentPage(p => p + 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* --- SISWA PANEL --- */}
+      {currentTab === 'siswa' && (
+        <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th onClick={() => handleSort('nisn')} className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider cursor-pointer hover:bg-slate-100 transition-colors">
+                    <div className="flex items-center gap-1">NISN <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                  </th>
+                  <th onClick={() => handleSort('nama')} className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider cursor-pointer hover:bg-slate-100 transition-colors">
+                    <div className="flex items-center gap-1">Nama Lengkap <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                  </th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Kelas</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {paginatedData.data.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="text-center py-10 text-slate-400 text-sm">Tidak ada siswa ditemukan.</td>
+                  </tr>
+                ) : (
+                  paginatedData.data.map((s: Student) => {
+                    const clsName = classes.find(c => c.id === s.kelas_id)?.nama || 'Tidak diketahui';
+                    return (
+                      <tr key={s.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-4 text-sm font-mono text-slate-600">{s.nisn}</td>
+                        <td className="px-6 py-4 text-sm font-semibold text-slate-800">{s.nama}</td>
+                        <td className="px-6 py-4 text-sm text-slate-500">{clsName}</td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => openModal('edit', 'student', s.id, { nisn: s.nisn, nama: s.nama, kelas_id: s.kelas_id })}
+                              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all rounded-xl"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => openModal('delete', 'student', s.id)}
+                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all rounded-xl"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+          {/* Pagination */}
+          {paginatedData.totalItems > itemsPerPage && (
+            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+              <span className="text-xs text-slate-500">Menampilkan {paginatedData.data.length} dari {paginatedData.totalItems} siswa.</span>
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => p - 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-semibold text-slate-700 px-3">{currentPage} / {paginatedData.totalPages}</span>
+                <button
+                  disabled={currentPage === paginatedData.totalPages}
+                  onClick={() => setCurrentPage(p => p + 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* --- MATA PELAJARAN PANEL --- */}
+      {currentTab === 'subject' && (
+        <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th onClick={() => handleSort('nama')} className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider cursor-pointer hover:bg-slate-100 transition-colors">
+                    <div className="flex items-center gap-1">Nama Mata Pelajaran <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                  </th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {paginatedData.data.length === 0 ? (
+                  <tr>
+                    <td colSpan={2} className="text-center py-10 text-slate-400 text-sm">Tidak ada mata pelajaran ditemukan.</td>
+                  </tr>
+                ) : (
+                  paginatedData.data.map((s: Subject) => (
+                    <tr key={s.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-4 text-sm font-semibold text-slate-800">{s.nama}</td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => openModal('edit', 'subject', s.id, { nama: s.nama })}
+                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all rounded-xl"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => openModal('delete', 'subject', s.id)}
+                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all rounded-xl"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          {/* Pagination */}
+          {paginatedData.totalItems > itemsPerPage && (
+            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+              <span className="text-xs text-slate-500">Menampilkan {paginatedData.data.length} dari {paginatedData.totalItems} mapel.</span>
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => p - 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-semibold text-slate-700 px-3">{currentPage} / {paginatedData.totalPages}</span>
+                <button
+                  disabled={currentPage === paginatedData.totalPages}
+                  onClick={() => setCurrentPage(p => p + 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* --- PENUGASAN GURU --- */}
+      {currentTab === 'assignment' && (
+        <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Guru Pengampu</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Kelas Ampuan</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Mata Pelajaran</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {paginatedData.data.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="text-center py-10 text-slate-400 text-sm">Belum ada penugasan mengajar guru.</td>
+                  </tr>
+                ) : (
+                  paginatedData.data.map((a: TeacherAssignment) => {
+                    const teacher = teachers.find(t => t.id === a.teacher_id);
+                    const cls = classes.find(c => c.id === a.class_id);
+                    const sub = subjects.find(s => s.id === a.subject_id);
+                    return (
+                      <tr key={a.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-4 text-sm font-semibold text-slate-800">{teacher?.nama || 'Guru terhapus'}</td>
+                        <td className="px-6 py-4 text-sm text-slate-600 font-medium">{cls?.nama || 'Kelas terhapus'}</td>
+                        <td className="px-6 py-4 text-sm text-indigo-700">
+                          <span className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-indigo-50 border border-indigo-100">
+                            {sub?.nama || 'Mapel terhapus'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button
+                            onClick={() => openModal('delete', 'assignment', a.id)}
+                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all rounded-xl"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+          {/* Pagination */}
+          {paginatedData.totalItems > itemsPerPage && (
+            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+              <span className="text-xs text-slate-500">Menampilkan {paginatedData.data.length} dari {paginatedData.totalItems} penugasan.</span>
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => p - 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-semibold text-slate-700 px-3">{currentPage} / {paginatedData.totalPages}</span>
+                <button
+                  disabled={currentPage === paginatedData.totalPages}
+                  onClick={() => setCurrentPage(p => p + 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* --- TAHUN PELAJARAN PANEL --- */}
+      {currentTab === 'academic-year' && (
+        <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Tahun Pelajaran</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Status Aktif</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {academicYears.map((y: AcademicYear) => (
+                  <tr key={y.id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-6 py-4 text-sm font-semibold text-slate-800">{y.nama}</td>
+                    <td className="px-6 py-4 text-sm">
+                      {y.aktif ? (
+                        <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">Aktif Berjalan</span>
+                      ) : (
+                        <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-50 text-slate-400 border border-slate-100">Tidak Aktif</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => openModal('edit', 'academicYear', y.id, { nama: y.nama, aktif: y.aktif ? 'true' : 'false' })}
+                          className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all rounded-xl"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => openModal('delete', 'academicYear', y.id)}
+                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all rounded-xl"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* --- SEMESTER PANEL --- */}
+      {currentTab === 'semester' && (
+        <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Semester</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Status Aktif</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {semesters.map((s: Semester) => (
+                  <tr key={s.id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-6 py-4 text-sm font-semibold text-slate-800">{s.nama}</td>
+                    <td className="px-6 py-4 text-sm">
+                      {s.aktif ? (
+                        <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">Aktif Berjalan</span>
+                      ) : (
+                        <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-50 text-slate-400 border border-slate-100">Tidak Aktif</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => openModal('edit', 'semester', s.id, { nama: s.nama, aktif: s.aktif ? 'true' : 'false' })}
+                          className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all rounded-xl"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => openModal('delete', 'semester', s.id)}
+                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all rounded-xl"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* --- AUDIT LOGS --- */}
+      {currentTab === 'logs' && (
+        <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+          <div className="p-6 border-b border-slate-100 flex justify-between items-center no-print">
+            <div>
+              <h3 className="text-base font-bold text-slate-800">Riwayat Perubahan Nilai & Sistem</h3>
+              <p className="text-xs text-slate-500 mt-1">Audit log aktivitas pengeditan nilai oleh guru atau admin.</p>
+            </div>
+            <button
+              onClick={() => setAuditLogs(db.getAuditLogs())}
+              className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-all rounded-xl flex items-center gap-1.5 text-xs font-semibold"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Segarkan Log
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Waktu Kejaidan</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Pengguna</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Aktivitas / Perubahan</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-mono text-xs">
+                {paginatedData.data.map((l: AuditLog) => (
+                  <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-6 py-4 text-slate-500">{new Date(l.timestamp).toLocaleString('id-ID')}</td>
+                    <td className="px-6 py-4 text-slate-800 font-semibold">{l.user}</td>
+                    <td className="px-6 py-4 text-slate-600">{l.action}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {/* Pagination */}
+          {paginatedData.totalItems > itemsPerPage && (
+            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/50 no-print">
+              <span className="text-xs text-slate-500">Menampilkan {paginatedData.data.length} dari {paginatedData.totalItems} baris audit.</span>
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => p - 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-semibold text-slate-700 px-3">{currentPage} / {paginatedData.totalPages}</span>
+                <button
+                  disabled={currentPage === paginatedData.totalPages}
+                  onClick={() => setCurrentPage(p => p + 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+
+      {/* --- DIALOG MODALS --- */}
+      <Modal 
+        isOpen={isModalOpen} 
+        onClose={closeModal} 
+        title={
+          modalType === 'delete' ? 'Konfirmasi Hapus Data' :
+          modalType === 'reset-pass' ? 'Reset Kata Sandi Akun' :
+          modalType === 'add' ? `Tambah Data ${targetEntity === 'teacher' ? 'Guru' : targetEntity === 'class' ? 'Kelas' : targetEntity === 'student' ? 'Siswa' : targetEntity === 'subject' ? 'Mapel' : targetEntity === 'assignment' ? 'Penugasan' : 'Konfigurasi'}` :
+          `Ubah Data ${targetEntity === 'teacher' ? 'Guru' : targetEntity === 'class' ? 'Kelas' : targetEntity === 'student' ? 'Siswa' : targetEntity === 'subject' ? 'Mapel' : 'Konfigurasi'}`
+        }
+      >
+        {modalType === 'delete' ? (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Apakah Anda yakin ingin menghapus data ini secara permanen? Tindakan ini tidak dapat dibatalkan dan semua riwayat terkait mungkin akan ikut terhapus atau disesuaikan.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button 
+                type="button" 
+                onClick={closeModal}
+                className="px-4 py-2 border border-slate-200 text-slate-600 font-semibold rounded-xl text-sm hover:bg-slate-50 transition-all"
+              >
+                Batal
+              </button>
+              <button 
+                type="button" 
+                onClick={handleFormSubmit}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded-xl text-sm transition-all"
+              >
+                Ya, Hapus Permanen
+              </button>
+            </div>
+          </div>
+        ) : modalType === 'reset-pass' ? (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Kata sandi untuk guru terpilih akan dikembalikan ke pengaturan awal pabrik yaitu: <strong className="font-mono text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded">guru123</strong>. Guru dapat menggunakannya kembali untuk login pertama kali.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button 
+                type="button" 
+                onClick={closeModal}
+                className="px-4 py-2 border border-slate-200 text-slate-600 font-semibold rounded-xl text-sm hover:bg-slate-50 transition-all"
+              >
+                Batal
+              </button>
+              <button 
+                type="button" 
+                onClick={handleFormSubmit}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-xl text-sm transition-all"
+              >
+                Ya, Reset Sandi
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* Create or Edit Form */
+          <form onSubmit={handleFormSubmit} className="space-y-4">
+            {targetEntity === 'teacher' && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Nama Guru Lengkap beserta Gelar</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.nama || ''}
+                    onChange={(e) => setFormData({ ...formData, nama: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm"
+                    placeholder="Budi Santoso, S.Pd."
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Email Akun (Gunakan untuk Login)</label>
+                  <input
+                    type="email"
+                    required
+                    value={formData.email || ''}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-mono"
+                    placeholder="nama@sekolah.sch.id"
+                  />
+                </div>
+              </>
+            )}
+
+            {targetEntity === 'class' && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Nama Kelas</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.nama || ''}
+                  onChange={(e) => setFormData({ ...formData, nama: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm"
+                  placeholder="Kelas 4-A"
+                />
+              </div>
+            )}
+
+            {targetEntity === 'subject' && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Nama Mata Pelajaran</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.nama || ''}
+                  onChange={(e) => setFormData({ ...formData, nama: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm"
+                  placeholder="Pendidikan Jasmani & Kesehatan"
+                />
+              </div>
+            )}
+
+            {targetEntity === 'student' && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">NISN (10 Digit Angka)</label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={10}
+                    value={formData.nisn || ''}
+                    onChange={(e) => setFormData({ ...formData, nisn: e.target.value.replace(/\D/g, '') })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-mono"
+                    placeholder="0014567891"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Nama Lengkap Siswa</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.nama || ''}
+                    onChange={(e) => setFormData({ ...formData, nama: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm"
+                    placeholder="Muhammad Akbar"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Pilih Kelas</label>
+                  <select
+                    value={formData.kelas_id || ''}
+                    onChange={(e) => setFormData({ ...formData, kelas_id: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm bg-white"
+                  >
+                    {classes.map(c => (
+                      <option key={c.id} value={c.id}>{c.nama}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+
+            {targetEntity === 'assignment' && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Pilih Guru Pengampu</label>
+                  <select
+                    value={formData.teacher_id || ''}
+                    onChange={(e) => setFormData({ ...formData, teacher_id: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm bg-white"
+                  >
+                    {teachers.map(t => (
+                      <option key={t.id} value={t.id}>{t.nama}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Pilih Kelas</label>
+                  <select
+                    value={formData.class_id || ''}
+                    onChange={(e) => setFormData({ ...formData, class_id: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm bg-white"
+                  >
+                    {classes.map(c => (
+                      <option key={c.id} value={c.id}>{c.nama}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Pilih Mata Pelajaran</label>
+                  <select
+                    value={formData.subject_id || ''}
+                    onChange={(e) => setFormData({ ...formData, subject_id: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm bg-white"
+                  >
+                    {subjects.map(s => (
+                      <option key={s.id} value={s.id}>{s.nama}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+
+            {targetEntity === 'academicYear' && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Tahun Pelajaran</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.nama || ''}
+                    onChange={(e) => setFormData({ ...formData, nama: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-mono"
+                    placeholder="2026/2027"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Status Aktif Berjalan</label>
+                  <select
+                    value={formData.aktif || 'false'}
+                    onChange={(e) => setFormData({ ...formData, aktif: e.target.value === 'true' })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm bg-white"
+                  >
+                    <option value="true">Aktif</option>
+                    <option value="false">Tidak Aktif</option>
+                  </select>
+                </div>
+              </>
+            )}
+
+            {targetEntity === 'semester' && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Nama Semester</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.nama || ''}
+                    onChange={(e) => setFormData({ ...formData, nama: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm"
+                    placeholder="Ganjil"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Status Aktif Berjalan</label>
+                  <select
+                    value={formData.aktif || 'false'}
+                    onChange={(e) => setFormData({ ...formData, aktif: e.target.value === 'true' })}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm bg-white"
+                  >
+                    <option value="true">Aktif</option>
+                    <option value="false">Tidak Aktif</option>
+                  </select>
+                </div>
+              </>
+            )}
+
+            <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+              <button 
+                type="button" 
+                onClick={closeModal}
+                className="px-4 py-2 border border-slate-200 text-slate-600 font-semibold rounded-xl text-sm hover:bg-slate-50 transition-all"
+              >
+                Batal
+              </button>
+              <button 
+                type="submit"
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm transition-all"
+              >
+                Simpan Perubahan
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* --- MASS EXCEL/CSV IMPORTER MODAL --- */}
+      <Modal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        title="Impor Massal Data Siswa (Salin Tempel dari Excel)"
+        maxWidth="2xl"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Guru SD umumnya memiliki berkas nilai dalam Microsoft Excel. Fitur ini memungkinkan Anda menyalin 2 kolom data di Excel yaitu <strong className="text-indigo-600">NISN (10 digit)</strong> dan <strong className="text-indigo-600">Nama Lengkap</strong>, lalu menempelkannya ke kotak di bawah secara langsung.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">1. Pilih Kelas Tujuan</label>
+              <select
+                value={importClassId}
+                onChange={(e) => setImportClassId(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm bg-white"
+              >
+                <option value="">-- Pilih Kelas --</option>
+                {classes.map(c => (
+                  <option key={c.id} value={c.id}>{c.nama}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-end justify-end">
+              <button
+                type="button"
+                onClick={loadSampleTemplate}
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1.5 p-2 hover:bg-indigo-50 rounded-lg transition-colors"
+              >
+                <FileText className="w-4 h-4" />
+                Gunakan Contoh Template
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">2. Tempel Data Excel (Kolom NISN & Nama)</label>
+            <textarea
+              rows={6}
+              value={pasteData}
+              onChange={(e) => setPasteData(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-xs font-mono placeholder:text-slate-400"
+              placeholder="0014567891&#9;Aditya Pratama&#10;0014567892&#9;Amanda Putri"
+            />
+          </div>
+
+          <div className="flex justify-between items-center">
+            <span className="text-xs text-slate-400">Pemisah baris otomatis dideteksi dari Tabulator Excel atau Koma.</span>
+            <button
+              type="button"
+              onClick={handleParseImport}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-xl transition-all"
+            >
+              Urai & Validasi Data
+            </button>
+          </div>
+
+          {/* Parsed Rows Preview */}
+          {parsedImportRows.length > 0 && (
+            <div className="border border-slate-150 rounded-xl overflow-hidden max-h-52 overflow-y-auto">
+              <div className="bg-slate-50 px-4 py-2 border-b border-slate-150 flex justify-between items-center text-xs font-semibold text-slate-500">
+                <span>Hasil Penguraian Data ({parsedImportRows.length} baris)</span>
+                <span className="text-emerald-600">{parsedImportRows.filter(r => r.valid).length} Valid</span>
+              </div>
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="bg-slate-100 border-b border-slate-150">
+                    <th className="px-3 py-1.5 text-slate-500 font-semibold">NISN</th>
+                    <th className="px-3 py-1.5 text-slate-500 font-semibold">Nama Lengkap</th>
+                    <th className="px-3 py-1.5 text-slate-500 font-semibold">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-mono">
+                  {parsedImportRows.map((row, i) => (
+                    <tr key={i} className={row.valid ? 'bg-emerald-50/20' : 'bg-rose-50/20'}>
+                      <td className="px-3 py-1.5 text-slate-600">{row.nisn || '-'}</td>
+                      <td className="px-3 py-1.5 font-sans font-medium text-slate-800">{row.nama}</td>
+                      <td className="px-3 py-1.5">
+                        {row.valid ? (
+                          <span className="text-emerald-600 font-bold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> OK</span>
+                        ) : (
+                          <span className="text-rose-600 font-bold flex items-center gap-1" title={row.error}>
+                            <AlertCircle className="w-3.5 h-3.5 text-rose-500" /> Gagal ({row.error})
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+            <button 
+              type="button" 
+              onClick={() => setIsImportModalOpen(false)}
+              className="px-4 py-2 border border-slate-200 text-slate-600 font-semibold rounded-xl text-sm hover:bg-slate-50 transition-all"
+            >
+              Batal
+            </button>
+            <button 
+              type="button"
+              disabled={parsedImportRows.filter(r => r.valid).length === 0 || !importClassId}
+              onClick={handleCommitImport}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Masukkan {parsedImportRows.filter(r => r.valid).length} Siswa Baru
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+    </div>
+  );
+};

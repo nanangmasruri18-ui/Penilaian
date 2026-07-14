@@ -1,0 +1,6 @@
+{
+  "name": "Penilaian Kurikulum Merdeka",
+  "description": "Aplikasi Penilaian Siswa SD Kurikulum Merdeka untuk guru dan administrator sekolah.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
