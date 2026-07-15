@@ -12,8 +12,36 @@ import {
   Users, Layers, GraduationCap, BookOpen, Calendar, Clock, 
   Plus, Edit, Trash2, Search, ArrowUpDown, RefreshCw, Key, 
   ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, FileText, Download,
-  Printer, FileSpreadsheet, User, Save, Eye, EyeOff
+  Printer, FileSpreadsheet, User, Save, Eye, EyeOff, History
 } from 'lucide-react';
+
+const getLogCategory = (action: string) => {
+  if (action.includes('TP')) {
+    return {
+      label: 'Tujuan Pembelajaran (TP)',
+      color: 'bg-indigo-50/70 text-indigo-700 border-indigo-100/50 dark:bg-indigo-950/20 dark:text-indigo-400 dark:border-indigo-900/30',
+      iconColor: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400',
+      type: 'tp' as const
+    };
+  }
+  if (action.toLowerCase().includes('lingkup materi')) {
+    return {
+      label: 'Lingkup Materi (LM)',
+      color: 'bg-amber-50/70 text-amber-700 border-amber-100/50 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30',
+      iconColor: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
+      type: 'lm' as const
+    };
+  }
+  if (action.toLowerCase().includes('nilai')) {
+    return {
+      label: 'Input Nilai',
+      color: 'bg-emerald-50/70 text-emerald-750 border-emerald-100/50 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30',
+      iconColor: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400',
+      type: 'nilai' as const
+    };
+  }
+  return null;
+};
 
 interface AdminModulesProps {
   currentTab: string;
@@ -75,6 +103,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
   });
   const [profilePass, setProfilePass] = useState<string>('');
   const [showPass, setShowPass] = useState<boolean>(false);
+  const [selectedLogType, setSelectedLogType] = useState<'all' | 'tp' | 'lm' | 'nilai'>('all');
 
   const handleKepsekNameChange = (val: string) => {
     setKepsekName(val);
@@ -939,7 +968,14 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     else if (currentTab === 'assignment') currentSet = filteredAssignments;
     else if (currentTab === 'academic-year') currentSet = academicYears;
     else if (currentTab === 'semester') currentSet = semesters;
-    else if (currentTab === 'logs') currentSet = auditLogs;
+    else if (currentTab === 'logs') {
+      currentSet = auditLogs.filter(l => {
+        const cat = getLogCategory(l.action);
+        if (!cat) return false;
+        if (selectedLogType === 'all') return true;
+        return cat.type === selectedLogType;
+      });
+    }
 
     // Sorting implementation
     if (sortField) {
@@ -961,7 +997,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
       totalItems: currentSet.length,
       totalPages: Math.ceil(currentSet.length / itemsPerPage) || 1
     };
-  }, [currentTab, filteredTeachers, filteredClasses, filteredStudents, filteredSubjects, filteredAssignments, academicYears, semesters, auditLogs, sortField, sortDirection, currentPage]);
+  }, [currentTab, filteredTeachers, filteredClasses, filteredStudents, filteredSubjects, filteredAssignments, academicYears, semesters, auditLogs, sortField, sortDirection, currentPage, selectedLogType]);
 
 
   return (
@@ -1516,56 +1552,156 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
       {/* --- AUDIT LOGS --- */}
       {currentTab === 'logs' && (
         <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-          <div className="p-6 border-b border-slate-100 flex justify-between items-center no-print">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 border-b border-slate-100 bg-slate-50/50">
             <div>
-              <h3 className="text-base font-bold text-slate-800">Riwayat Perubahan Nilai & Sistem</h3>
-              <p className="text-xs text-slate-500 mt-1">Audit log aktivitas pengeditan nilai oleh guru atau admin.</p>
+              <h3 className="text-base font-bold text-slate-800">Log Aktivitas Guru</h3>
+              <p className="text-xs text-slate-500 mt-1">Audit terpusat aktivitas pengisian TP, lingkup materi, dan penilaian nilai siswa.</p>
             </div>
-            <button
-              onClick={() => setAuditLogs(db.getAuditLogs())}
-              className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-all rounded-xl flex items-center gap-1.5 text-xs font-semibold"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Segarkan Log
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => { setSelectedLogType('all'); setCurrentPage(1); }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                  selectedLogType === 'all'
+                    ? 'bg-slate-900 border-slate-900 text-white shadow-sm shadow-slate-100'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                Semua
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSelectedLogType('tp'); setCurrentPage(1); }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 ${
+                  selectedLogType === 'tp'
+                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm shadow-indigo-105'
+                    : 'bg-white border-slate-200 text-indigo-700 hover:bg-indigo-50/50'
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                Input TP
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSelectedLogType('lm'); setCurrentPage(1); }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 ${
+                  selectedLogType === 'lm'
+                    ? 'bg-amber-600 border-amber-600 text-white shadow-sm shadow-amber-105'
+                    : 'bg-white border-slate-200 text-amber-700 hover:bg-amber-50/50'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                Input Lingkup Materi
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSelectedLogType('nilai'); setCurrentPage(1); }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 ${
+                  selectedLogType === 'nilai'
+                    ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm shadow-emerald-105'
+                    : 'bg-white border-slate-200 text-emerald-700 hover:bg-emerald-50/50'
+                }`}
+              >
+                <GraduationCap className="w-3.5 h-3.5" />
+                Input Nilai
+              </button>
+              
+              <div className="w-[1px] h-5 bg-slate-200 mx-1 hidden sm:block" />
+
+              <button
+                onClick={() => { setAuditLogs(db.getAuditLogs()); setCurrentPage(1); }}
+                className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100/80 transition-all rounded-xl flex items-center gap-1.5 text-xs font-bold border border-slate-200 bg-white"
+                title="Segarkan Log"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
+          
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
-                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Waktu Kejaidan</th>
-                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Pengguna</th>
-                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Aktivitas / Perubahan</th>
+                  <th className="px-6 py-4 text-xs font-bold uppercase text-slate-400 tracking-wider w-48">Waktu Kejadian</th>
+                  <th className="px-6 py-4 text-xs font-bold uppercase text-slate-400 tracking-wider w-64">Nama Guru / Pengguna</th>
+                  <th className="px-6 py-4 text-xs font-bold uppercase text-slate-400 tracking-wider">Aktivitas / Perubahan Data</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 font-mono text-xs">
-                {paginatedData.data.map((l: AuditLog) => (
-                  <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-6 py-4 text-slate-500">{new Date(l.timestamp).toLocaleString('id-ID')}</td>
-                    <td className="px-6 py-4 text-slate-800 font-semibold">{l.user}</td>
-                    <td className="px-6 py-4 text-slate-600">{l.action}</td>
+              <tbody className="divide-y divide-slate-100">
+                {paginatedData.data.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="px-6 py-16 text-center text-slate-450">
+                      <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                        <div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400 mb-3 border border-slate-100">
+                          <History className="w-6 h-6" />
+                        </div>
+                        <p className="text-sm font-bold text-slate-800">Tidak ada riwayat ditemukan</p>
+                        <p className="text-xs text-slate-500 mt-1">Belum ada aktivitas guru dalam kategori ini yang terekam di sistem.</p>
+                      </div>
+                    </td>
                   </tr>
-                ))}
+                ) : (
+                  paginatedData.data.map((l: AuditLog) => {
+                    const cat = getLogCategory(l.action);
+                    const isTP = cat?.type === 'tp';
+                    const isLM = cat?.type === 'lm';
+                    const isNilai = cat?.type === 'nilai';
+                    
+                    return (
+                      <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-4 text-slate-500 text-xs font-medium font-mono">
+                          {new Date(l.timestamp).toLocaleString('id-ID', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                          })}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-600 text-xs uppercase border border-slate-200">
+                              {l.user ? l.user.substring(0, 2) : 'GR'}
+                            </div>
+                            <span className="text-slate-800 font-bold text-sm">{l.user}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded-full border ${cat?.color || 'bg-slate-50 text-slate-500 border-slate-100'}`}>
+                              {isTP && <BookOpen className="w-3 h-3" />}
+                              {isLM && <Layers className="w-3 h-3" />}
+                              {isNilai && <GraduationCap className="w-3 h-3" />}
+                              {cat?.label || 'Aktivitas'}
+                            </span>
+                            <span className="text-slate-750 text-xs font-semibold leading-relaxed">{l.action}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
           {/* Pagination */}
           {paginatedData.totalItems > itemsPerPage && (
             <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/50 no-print">
-              <span className="text-xs text-slate-500">Menampilkan {paginatedData.data.length} dari {paginatedData.totalItems} baris audit.</span>
+              <span className="text-xs text-slate-500 font-medium">Menampilkan {paginatedData.data.length} dari {paginatedData.totalItems} baris audit.</span>
               <div className="flex items-center gap-1">
                 <button
                   disabled={currentPage === 1}
                   onClick={() => setCurrentPage(p => p - 1)}
-                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all cursor-pointer"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span className="text-xs font-semibold text-slate-700 px-3">{currentPage} / {paginatedData.totalPages}</span>
+                <span className="text-xs font-bold text-slate-700 px-3">{currentPage} / {paginatedData.totalPages}</span>
                 <button
                   disabled={currentPage === paginatedData.totalPages}
                   onClick={() => setCurrentPage(p => p + 1)}
-                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all"
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 transition-all cursor-pointer"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
