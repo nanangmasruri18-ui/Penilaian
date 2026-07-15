@@ -12,7 +12,7 @@ import {
   Users, Layers, GraduationCap, BookOpen, Calendar, Clock, 
   Plus, Edit, Trash2, Search, ArrowUpDown, RefreshCw, Key, 
   ChevronLeft, ChevronRight, Upload, CheckCircle2, AlertCircle, FileText, Download,
-  Printer, FileSpreadsheet
+  Printer, FileSpreadsheet, User, Save, Eye, EyeOff
 } from 'lucide-react';
 
 interface AdminModulesProps {
@@ -69,6 +69,13 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     return localStorage.getItem('rekap_teacher_nip') || '19891204 201504 2 003';
   });
 
+  // Profile & Password settings for Admin
+  const [profileName, setProfileName] = useState<string>(() => {
+    return db.getSession()?.nama || '';
+  });
+  const [profilePass, setProfilePass] = useState<string>('');
+  const [showPass, setShowPass] = useState<boolean>(false);
+
   const handleKepsekNameChange = (val: string) => {
     setKepsekName(val);
     localStorage.setItem('rekap_kepsek_name', val);
@@ -92,6 +99,37 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
   const handleTeacherNipChange = (val: string) => {
     setTeacherNip(val);
     localStorage.setItem('rekap_teacher_nip', val);
+  };
+
+  // --- Admin Profile & Password Update ---
+  const handleProfileSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const session = db.getSession();
+    if (!session) return;
+
+    const name = profileName.trim();
+    if (!name) {
+      addToast('error', 'Nama Kosong', 'Nama profil tidak boleh kosong.');
+      return;
+    }
+
+    // Update session and profiles database
+    const updatedSession = { ...session, nama: name, ...(profilePass ? { password: profilePass } : {}) };
+    const allProfiles = db.getProfiles();
+    const updatedProfiles = allProfiles.map(p => p.id === session.id ? { ...p, nama: name, ...(profilePass ? { password: profilePass } : {}) } : p);
+
+    db.setProfiles(updatedProfiles);
+    db.setSession(updatedSession);
+
+    logAudit(name, `Memperbarui profil diri Administrator.`);
+    addToast('success', 'Profil Diperbarui', 'Nama profil Anda berhasil disimpan.');
+
+    if (profilePass) {
+      logAudit(name, `Mengubah kata sandi akun Administrator.`);
+      addToast('success', 'Sandi Berhasil Diubah', 'Kata sandi baru Anda berhasil diaktifkan.');
+      setProfilePass('');
+    }
+    syncState();
   };
 
   // Helper to sync local state with db
@@ -1534,6 +1572,75 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* --- PROFILE ADMINISTRATOR VIEW --- */}
+      {currentTab === 'profil' && (
+        <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm max-w-xl mx-auto">
+          <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white">
+              <User className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-800">Pengaturan Profil & Sandi Admin</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Kelola nama dan kata sandi akun Administrator Anda.</p>
+            </div>
+          </div>
+          <form onSubmit={handleProfileSubmit} className="p-6 space-y-5">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Alamat Email (Akun Login)</label>
+              <input
+                type="text"
+                disabled
+                value={db.getSession()?.email || ''}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 text-sm font-mono cursor-not-allowed"
+              />
+              <span className="text-[10px] text-slate-400 mt-1 block">Email akun dikonfigurasi sebagai Administrator sekolah.</span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Nama Lengkap Administrator</label>
+              <input
+                type="text"
+                required
+                value={profileName}
+                onChange={(e) => setProfileName(e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-semibold"
+                placeholder="Administrator Utama"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Ubah Sandi Baru (Opsional)</label>
+              <div className="relative">
+                <input
+                  type={showPass ? 'text' : 'password'}
+                  value={profilePass}
+                  onChange={(e) => setProfilePass(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-mono"
+                  placeholder="Isi jika ingin merubah kata sandi..."
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPass(!showPass)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="submit"
+                className="flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-all rounded-xl shadow-lg shadow-indigo-100"
+              >
+                <Save className="w-4 h-4" />
+                Simpan Perubahan Profil
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

@@ -34,11 +34,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, addToast }) => {
         return;
       }
 
-      // Match mock passwords
+      // Match mock or custom passwords
       let isCorrect = false;
-      if (matchedProfile.role === 'Admin' && password === 'admin123') {
-        isCorrect = true;
-      } else if (matchedProfile.role === 'Guru' && password === 'guru123') {
+      const defaultPassword = matchedProfile.role === 'Admin' ? 'admin123' : 'guru123';
+      const expectedPassword = matchedProfile.password || defaultPassword;
+      if (password === expectedPassword) {
         isCorrect = true;
       }
 
@@ -48,7 +48,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, addToast }) => {
         addToast('success', 'Selamat Datang', `Berhasil masuk sebagai ${matchedProfile.nama} (${matchedProfile.role}).`);
         onLoginSuccess(matchedProfile);
       } else {
-        addToast('error', 'Login Gagal', 'Kata sandi salah. Gunakan password "admin123" untuk Admin atau "guru123" untuk Guru.');
+        addToast('error', 'Login Gagal', `Kata sandi salah. Gunakan password yang benar${matchedProfile.password ? '' : ' atau default ("admin123" / "guru123")'}.`);
       }
       setLoading(false);
     }, 600);

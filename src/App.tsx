@@ -295,7 +295,8 @@ export default function App() {
     { id: 'assignment', label: 'Penugasan Guru', icon: Sliders },
     { id: 'rekap', label: 'Rekapitulasi Nilai', icon: FileText },
     { id: 'supabase', label: 'Database Supabase', icon: Database },
-    { id: 'logs', label: 'Log Aktivitas', icon: History }
+    { id: 'logs', label: 'Log Aktivitas', icon: History },
+    { id: 'profil', label: 'Profil Saya', icon: User }
   ];
 
   const guruMenuItems = [

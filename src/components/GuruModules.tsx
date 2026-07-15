@@ -322,9 +322,9 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     }
 
     // Update session and profiles database
-    const updatedSession = { ...session, nama: name };
+    const updatedSession = { ...session, nama: name, ...(profilePass ? { password: profilePass } : {}) };
     const allProfiles = db.getProfiles();
-    const updatedProfiles = allProfiles.map(p => p.id === session.id ? { ...p, nama: name } : p);
+    const updatedProfiles = allProfiles.map(p => p.id === session.id ? { ...p, nama: name, ...(profilePass ? { password: profilePass } : {}) } : p);
 
     db.setProfiles(updatedProfiles);
     db.setSession(updatedSession);

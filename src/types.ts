@@ -5,6 +5,7 @@ export interface Profile {
   nama: string;
   role: UserRole;
   email: string;
+  password?: string;
 }
 
 export interface Teacher {
