@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 // User's Supabase credentials as fallback/defaults, but can be overridden by environment variables
-const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://htbpkfzwutyekhfldini.supabase.co';
+const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://anadwoytkjvuknucwymd.supabase.co/rest/v1/';
 const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFuYWR3b3l0a2p2dWtudWN3eW1kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMjc3MjIsImV4cCI6MjA5OTYwMzcyMn0.3f2I5r7_EH9drjP2DsmV-AzCmsevjkIHe7zb6kfTI7s';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
