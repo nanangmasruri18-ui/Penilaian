@@ -17,7 +17,7 @@ import {
   GraduationCap, LogOut, Sun, Moon, Menu, X, LayoutDashboard, 
   Users, Layers, BookOpen, Calendar, Clock, History, Settings, 
   Sliders, User, Shield, Info, Database, AlertTriangle, ArrowRight, CheckCircle, Flame,
-  Sparkles, FileText
+  Sparkles, FileText, Trophy, Award
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -232,14 +232,91 @@ export default function App() {
     };
   }, [sessionUser, stats]); // recompute when base stats or user changes
 
-  // Compute data for Admin Dashboard SVG Chart (Students per class)
-  const studentsPerClassData = useMemo(() => {
-    const classes = db.getClasses();
+  // Compute data for Admin Dashboard: Top 10 students with the highest scores
+  const topStudentsData = useMemo(() => {
     const students = db.getStudents();
-    return classes.map(c => {
-      const count = students.filter(s => s.kelas_id === c.id).length;
-      return { name: c.nama, count };
+    const classes = db.getClasses();
+    const tps = db.getLearningObjectives();
+    const scopes = db.getMaterialScopes();
+    const formativeScores = db.getFormativeScores();
+    const summativeScores = db.getSummativeScopeScores();
+    const semesterScores = db.getSemesterScores();
+    const assignments = db.getAssignments();
+    const context = getActiveContext();
+
+    const semId = context.semester?.id || 'sem-ganjil';
+    const yrId = context.year?.id || 'th-2025';
+
+    const list = students.map(student => {
+      const cls = classes.find(c => c.id === student.kelas_id);
+      
+      // Find subjects assigned to this class
+      const classSubjectIds = Array.from(new Set(
+        assignments.filter(a => a.class_id === student.kelas_id).map(a => a.subject_id)
+      ));
+
+      let totalSubjectGradesSum = 0;
+      let gradedSubjectsCount = 0;
+
+      classSubjectIds.forEach(subId => {
+        // Formative TP scores
+        const subTps = tps.filter(t => t.class_id === student.kelas_id && t.subject_id === subId);
+        const tpScores = subTps
+          .map(tp => {
+            const f = formativeScores.find(fs => fs.student_id === student.id && fs.tp_id === tp.id && fs.semester === semId && fs.tahun === yrId);
+            return f ? f.nilai : null;
+          })
+          .filter(v => v !== null) as number[];
+
+        const formativeAvg = tpScores.length > 0 ? tpScores.reduce((a, b) => a + b, 0) / tpScores.length : 0;
+
+        // Summative scope scores
+        const subScopes = scopes.filter(sc => sc.class_id === student.kelas_id && sc.subject_id === subId);
+        const scopeScores = subScopes
+          .map(sc => {
+            const s = summativeScores.find(ss => ss.student_id === student.id && ss.lingkup_id === sc.id && ss.semester === semId && ss.tahun === yrId);
+            return s ? s.nilai : null;
+          })
+          .filter(v => v !== null) as number[];
+
+        const scopeAvg = scopeScores.length > 0 ? scopeScores.reduce((a, b) => a + b, 0) / scopeScores.length : 0;
+
+        // SAS score
+        const sasObj = semesterScores.find(s => s.student_id === student.id && s.subject_id === subId && s.semester === semId && s.tahun === yrId);
+        const sasScore = sasObj ? sasObj.nilai : null;
+
+        // Only compute if there is at least one grade in this subject (either formative, scope, or SAS)
+        const hasFormative = tpScores.length > 0;
+        const hasScope = scopeScores.length > 0;
+        const hasSas = sasScore !== null;
+
+        if (hasFormative || hasScope || hasSas) {
+          const finalScore = Math.round(
+            (formativeAvg * 0.4) +
+            (scopeAvg * 0.4) +
+            ((sasScore || 0) * 0.2)
+          );
+          totalSubjectGradesSum += finalScore;
+          gradedSubjectsCount++;
+        }
+      });
+
+      const averageGrade = gradedSubjectsCount > 0 ? Math.round(totalSubjectGradesSum / gradedSubjectsCount) : 0;
+
+      return {
+        id: student.id,
+        name: student.nama,
+        nisn: student.nisn,
+        className: cls?.nama || 'Kelas ?',
+        averageGrade,
+        gradedSubjectsCount
+      };
     });
+
+    // Sort by averageGrade descending, and take top 10
+    return list
+      .sort((a, b) => b.averageGrade - a.averageGrade)
+      .slice(0, 10);
   }, [stats]);
 
   const handleSupabasePush = async () => {
@@ -528,42 +605,94 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* ADMIN GRAPHICS (Bespoke SVG Student demographics chart & Bento Grid) */}
+                      {/* ADMIN GRAPHICS (Bespoke Top 10 highest-scoring students table & Bento Grid) */}
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         
-                        {/* Dynamic Class demographics SVG Chart */}
+                        {/* 10 Siswa dengan Nilai Tertinggi */}
                         <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm lg:col-span-2 space-y-4">
-                          <div>
-                            <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">Demografi Siswa Per Kelas</h3>
-                            <p className="text-xs text-slate-500">Distribusi jumlah siswa terdaftar untuk tiap-tiap rombongan belajar (rombel).</p>
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-amber-50 dark:bg-amber-950/40 rounded-xl flex items-center justify-center text-amber-500 border border-amber-100/50 dark:border-amber-900/30">
+                              <Trophy className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">10 Siswa Nilai Tertinggi</h3>
+                              <p className="text-xs text-slate-500">Rekapitulasi peringkat 10 siswa dengan rata-rata nilai mata pelajaran tertinggi.</p>
+                            </div>
                           </div>
 
-                          {/* Beautiful SVG Bar chart */}
-                          <div className="h-56 w-full flex items-end justify-between px-2 pt-6 border-b border-slate-100 dark:border-slate-800 pb-1 font-mono text-[10px] text-slate-400">
-                            {studentsPerClassData.map((data, i) => {
-                              const maxVal = Math.max(...studentsPerClassData.map(d => d.count), 1);
-                              const heightPct = (data.count / maxVal) * 80; // keep max bar at 80% height
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                              <thead>
+                                <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-450 dark:text-slate-400">
+                                  <th className="py-3 text-xs font-bold uppercase w-14 text-center">Rank</th>
+                                  <th className="py-3 px-3 text-xs font-bold uppercase">Nama Siswa</th>
+                                  <th className="py-3 px-3 text-xs font-bold uppercase text-center w-28">Kelas</th>
+                                  <th className="py-3 px-3 text-xs font-bold uppercase text-center w-28">Rata-Rata</th>
+                                  <th className="py-3 px-3 text-xs font-bold uppercase text-center w-28">Aktif Mapel</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {topStudentsData.length === 0 || topStudentsData.every(s => s.averageGrade === 0) ? (
+                                  <tr>
+                                    <td colSpan={5} className="py-12 text-center text-slate-400 dark:text-slate-500">
+                                      <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                                        <div className="w-12 h-12 rounded-2xl bg-slate-50 dark:bg-slate-800/50 flex items-center justify-center text-slate-400 mb-3 border border-slate-100 dark:border-slate-800">
+                                          <Award className="w-6 h-6" />
+                                        </div>
+                                        <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Belum Ada Data Nilai</p>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Guru perlu menginput data Tujuan Pembelajaran (TP), lingkup materi, dan nilai terlebih dahulu.</p>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  topStudentsData.map((student, idx) => {
+                                    const rank = idx + 1;
+                                    let rankBadgeColor = 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400';
+                                    if (rank === 1) rankBadgeColor = 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200/50 dark:border-amber-900/30 font-extrabold';
+                                    else if (rank === 2) rankBadgeColor = 'bg-slate-200 text-slate-700 dark:bg-slate-850 dark:text-slate-300 border border-slate-300/30 font-bold';
+                                    else if (rank === 3) rankBadgeColor = 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-400 border border-orange-200/50 dark:border-orange-900/30 font-bold';
 
-                              return (
-                                <div key={i} className="flex flex-col items-center flex-1 group relative">
-                                  {/* Floating Tooltip */}
-                                  <div className="absolute bottom-full mb-2 bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 font-sans pointer-events-none">
-                                    {data.count} Siswa
-                                  </div>
-                                  
-                                  {/* Bar Element */}
-                                  <div 
-                                    className="w-8 sm:w-12 bg-indigo-600/80 hover:bg-indigo-600 dark:bg-indigo-500/80 dark:hover:bg-indigo-500 rounded-t-lg transition-all cursor-pointer flex items-end justify-center"
-                                    style={{ height: `${heightPct}%` }}
-                                  >
-                                    <span className="text-[10px] text-white font-bold mb-1 opacity-0 group-hover:opacity-100 transition-opacity">{data.count}</span>
-                                  </div>
+                                    let gradeBadgeColor = 'bg-slate-50 text-slate-600 dark:bg-slate-800/40 dark:text-slate-400';
+                                    if (student.averageGrade >= 85) {
+                                      gradeBadgeColor = 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400 border border-emerald-100/50 dark:border-emerald-900/30';
+                                    } else if (student.averageGrade >= 75) {
+                                      gradeBadgeColor = 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-400 border border-indigo-100/50 dark:border-indigo-900/30';
+                                    } else if (student.averageGrade > 0) {
+                                      gradeBadgeColor = 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-100/50 dark:border-amber-900/30';
+                                    }
 
-                                  {/* Class label */}
-                                  <span className="mt-2 text-slate-600 dark:text-slate-400 font-sans font-medium text-[10px] whitespace-nowrap">{data.name}</span>
-                                </div>
-                              );
-                            })}
+                                    return (
+                                      <tr key={student.id} className="hover:bg-slate-50/30 dark:hover:bg-slate-800/20 transition-colors">
+                                        <td className="py-3 text-center">
+                                          <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-semibold ${rankBadgeColor}`}>
+                                            {rank}
+                                          </span>
+                                        </td>
+                                        <td className="py-3 px-3">
+                                          <div className="font-bold text-slate-800 dark:text-slate-200 text-sm">{student.name}</div>
+                                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">NISN: {student.nisn || '-'}</div>
+                                        </td>
+                                        <td className="py-3 px-3 text-center">
+                                          <span className="inline-flex px-2 py-1 bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-350 rounded-lg text-xs font-bold border border-slate-200/50 dark:border-slate-800">
+                                            {student.className}
+                                          </span>
+                                        </td>
+                                        <td className="py-3 px-3 text-center">
+                                          <span className={`inline-flex items-center gap-1 px-3 py-1 text-sm font-bold rounded-xl border ${gradeBadgeColor}`}>
+                                            {student.averageGrade}
+                                          </span>
+                                        </td>
+                                        <td className="py-3 px-3 text-center">
+                                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-450">
+                                            {student.gradedSubjectsCount} Mapel
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })
+                                )}
+                              </tbody>
+                            </table>
                           </div>
                         </div>
 
