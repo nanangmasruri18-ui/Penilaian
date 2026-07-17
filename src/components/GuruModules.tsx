@@ -190,11 +190,16 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
   // Auto-select active TP when activeTps list changes
   useEffect(() => {
     if (activeTps.length > 0) {
-      setActiveTpId(activeTps[0].id);
+      const isValid = activeTps.some(tp => tp.id === activeTpId);
+      if (!activeTpId || !isValid) {
+        setActiveTpId(activeTps[0].id);
+      }
     } else {
-      setActiveTpId('');
+      if (activeTpId !== '') {
+        setActiveTpId('');
+      }
     }
-  }, [activeTps]);
+  }, [activeTps, activeTpId]);
 
   // List of Scopes for active class & subject
   const activeScopes = useMemo(() => {
@@ -205,11 +210,16 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
   // Auto-select active Scope when activeScopes list changes
   useEffect(() => {
     if (activeScopes.length > 0) {
-      setActiveScopeId(activeScopes[0].id);
+      const isValid = activeScopes.some(sc => sc.id === activeScopeId);
+      if (!activeScopeId || !isValid) {
+        setActiveScopeId(activeScopes[0].id);
+      }
     } else {
-      setActiveScopeId('');
+      if (activeScopeId !== '') {
+        setActiveScopeId('');
+      }
     }
-  }, [activeScopes]);
+  }, [activeScopes, activeScopeId]);
 
   // Open / Close modal helpers
   const openModal = (type: 'add' | 'edit' | 'delete', entity: string, id: string = '', initialData: any = {}) => {
