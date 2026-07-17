@@ -608,16 +608,18 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
       return cols;
     });
 
-    // Simple robust CSV with UTF8 BOM
+    // Semicolon-delimited CSV with UTF8 BOM and Excel explicit separator definition for perfect column separation
+    const separator = ';';
     const content = [
-      headers.join(','),
+      `sep=${separator}`,
+      headers.join(separator),
       ...rows.map(row => row.map(val => {
         const stringVal = String(val === undefined || val === null ? '' : val);
-        if (stringVal.includes(',') || stringVal.includes('"') || stringVal.includes('\n')) {
+        if (stringVal.includes(separator) || stringVal.includes('"') || stringVal.includes('\n')) {
           return `"${stringVal.replace(/"/g, '""')}"`;
         }
         return stringVal;
-      }).join(','))
+      }).join(separator))
     ].join('\n');
 
     const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), content], { type: 'text/csv;charset=utf-8;' });
@@ -629,7 +631,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     link.click();
     document.body.removeChild(link);
 
-    addToast('success', 'Ekspor Excel Berhasil', `File CSV '${fileName}.csv' telah diunduh.`);
+    addToast('success', 'Ekspor Excel Berhasil', `File CSV '${fileName}.csv' telah diunduh dengan pemisah kolom otomatis.`);
   };
 
   // Print report trigger (will print current Landscape A4 view)
@@ -756,7 +758,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                   className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100 transition-all rounded-xl shadow-xs cursor-pointer"
                 >
                   <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                  Excel (.xlsx)
+                  Ekspor Excel
                 </button>
                 <button
                   onClick={handlePrint}

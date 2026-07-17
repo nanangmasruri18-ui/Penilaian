@@ -928,16 +928,18 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
       return cols;
     });
 
-    // Simple robust CSV with UTF8 BOM
+    // Semicolon-delimited CSV with UTF8 BOM and Excel explicit separator definition for perfect column separation
+    const separator = ';';
     const content = [
-      headers.join(','),
+      `sep=${separator}`,
+      headers.join(separator),
       ...rows.map(row => row.map(val => {
         const stringVal = String(val === undefined || val === null ? '' : val);
-        if (stringVal.includes(',') || stringVal.includes('"') || stringVal.includes('\n')) {
+        if (stringVal.includes(separator) || stringVal.includes('"') || stringVal.includes('\n')) {
           return `"${stringVal.replace(/"/g, '""')}"`;
         }
         return stringVal;
-      }).join(','))
+      }).join(separator))
     ].join('\n');
 
     const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), content], { type: 'text/csv;charset=utf-8;' });
@@ -949,7 +951,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     link.click();
     document.body.removeChild(link);
 
-    addToast('success', 'Ekspor Excel Berhasil', `File CSV '${fileName}.csv' telah diunduh.`);
+    addToast('success', 'Ekspor Excel Berhasil', `File CSV '${fileName}.csv' telah diunduh dengan pemisah kolom otomatis.`);
   };
 
   // Print report trigger (will print current Landscape A4 view)
