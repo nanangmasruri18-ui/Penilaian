@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   db, logAudit, getActiveContext, getTeacherForUser, 
   getTeacherAssignedClassesAndSubjects, saveFormativeGrades, 
@@ -67,6 +67,53 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
 
   // Auto-Save notification states
   const [savingStates, setSavingStates] = useState<{ [studentId: string]: 'idle' | 'saving' | 'saved' }>({});
+
+  // Local grades state to keep inputs completely responsive and stable
+  const [localGrades, setLocalGrades] = useState<Record<string, string>>({});
+  const saveTimeouts = useRef<Record<string, any>>({});
+
+  useEffect(() => {
+    const newGrades: Record<string, string> = {};
+    const semId = context.semester?.id || '';
+    const yrId = context.year?.id || '';
+
+    if (currentTab === 'formative') {
+      if (activeTpId) {
+        formativeScores.forEach(s => {
+          if (s.tp_id === activeTpId && s.semester === semId && s.tahun === yrId) {
+            newGrades[s.student_id] = String(s.nilai);
+          }
+        });
+      }
+    } else if (currentTab === 'summative-scope') {
+      if (activeScopeId) {
+        summativeScores.forEach(s => {
+          if (s.lingkup_id === activeScopeId && s.semester === semId && s.tahun === yrId) {
+            newGrades[s.student_id] = String(s.nilai);
+          }
+        });
+      }
+    } else if (currentTab === 'sas') {
+      if (activeSubjectId) {
+        semesterScores.forEach(s => {
+          if (s.subject_id === activeSubjectId && s.semester === semId && s.tahun === yrId) {
+            newGrades[s.student_id] = String(s.nilai);
+          }
+        });
+      }
+    }
+    setLocalGrades(newGrades);
+  }, [
+    currentTab, 
+    activeTpId, 
+    activeScopeId, 
+    activeSubjectId, 
+    formativeScores, 
+    summativeScores, 
+    semesterScores, 
+    context.semester?.id, 
+    context.year?.id
+  ]);
 
   // Profile Change State
   const [profileName, setProfileName] = useState(session?.nama || '');
@@ -354,14 +401,22 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     value: string, 
     type: 'formative' | 'summative-scope' | 'semester-score'
   ) => {
-    const rawVal = parseInt(value, 10);
-    const score = isNaN(rawVal) ? 0 : Math.min(100, Math.max(0, rawVal));
+    // Update local state immediately for responsive/consistent typing
+    setLocalGrades(prev => ({ ...prev, [studentId]: value }));
 
     // Show saving animation
     setSavingStates(prev => ({ ...prev, [studentId]: 'saving' }));
 
-    // Auto save debouncer emulation
-    setTimeout(() => {
+    // Clear any previous scheduled saving for this student to prevent race conditions
+    if (saveTimeouts.current[studentId]) {
+      clearTimeout(saveTimeouts.current[studentId]);
+    }
+
+    // Debounce the save to local database (400ms is standard)
+    saveTimeouts.current[studentId] = setTimeout(() => {
+      const rawVal = parseInt(value, 10);
+      const score = isNaN(rawVal) ? 0 : Math.min(100, Math.max(0, rawVal));
+
       const editorName = session?.nama || 'Guru';
       const semesterId = context.semester?.id || 'sem-ganjil';
       const yearId = context.year?.id || 'th-2025';
@@ -386,7 +441,8 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
         setSavingStates(prev => ({ ...prev, [studentId]: 'idle' }));
       }, 1500);
 
-    }, 300);
+      delete saveTimeouts.current[studentId];
+    }, 400);
   };
 
   // --- Copy semester scores helper ---
@@ -874,7 +930,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                               type="number"
                               min={0}
                               max={100}
-                              value={currentVal}
+                              value={localGrades[student.id] ?? ''}
                               onChange={(e) => handleGradeChange(student.id, e.target.value, 'formative')}
                               className="w-24 text-center px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-semibold font-mono"
                               placeholder="0"
@@ -960,7 +1016,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                               type="number"
                               min={0}
                               max={100}
-                              value={currentVal}
+                              value={localGrades[student.id] ?? ''}
                               onChange={(e) => handleGradeChange(student.id, e.target.value, 'summative-scope')}
                               className="w-24 text-center px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-semibold font-mono"
                               placeholder="0"
@@ -1037,7 +1093,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                             type="number"
                             min={0}
                             max={100}
-                            value={currentVal}
+                            value={localGrades[student.id] ?? ''}
                             onChange={(e) => handleGradeChange(student.id, e.target.value, 'semester-score')}
                             className="w-24 text-center px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-semibold font-mono"
                             placeholder="0"
