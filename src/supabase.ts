@@ -139,15 +139,21 @@ async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
       }
       
       // 2. Try to update conditionally using the fetched updated_at to ensure no race condition
-      const { data: updateData, error: updateError } = await supabase
+      let query = supabase
         .from('merdeka_store')
         .update({
           value: finalData,
           updated_at: nowIso
         })
-        .eq('key', key)
-        .eq('updated_at', remoteRow.updated_at)
-        .select();
+        .eq('key', key);
+
+      if (remoteRow.updated_at === null || remoteRow.updated_at === undefined) {
+        query = query.is('updated_at', null);
+      } else {
+        query = query.eq('updated_at', remoteRow.updated_at);
+      }
+
+      const { data: updateData, error: updateError } = await query.select();
 
       if (updateError) {
         console.warn(`[fetchMergeAndSave] Update error on attempt ${attempt}:`, updateError);

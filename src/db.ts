@@ -65,9 +65,68 @@ function get<T>(key: string, defaultValue: T): T {
 }
 
 function set<T>(key: string, value: T): void {
-  localStorage.setItem(key, JSON.stringify(value));
+  // If value is an array of objects with an 'id' field, automatically add/update `updated_at`
+  let finalValue: any = value;
+  
+  if (Array.isArray(value)) {
+    const oldItems = (() => {
+      const oldStr = localStorage.getItem(key);
+      if (!oldStr) return [];
+      try {
+        const parsed = JSON.parse(oldStr);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })();
+    
+    const oldMap = new Map<string, any>();
+    oldItems.forEach((item: any) => {
+      if (item && typeof item === 'object' && 'id' in item) {
+        oldMap.set(item.id, item);
+      }
+    });
+    
+    const nowIso = new Date().toISOString();
+    
+    finalValue = value.map((item: any) => {
+      if (item && typeof item === 'object' && 'id' in item) {
+        const oldItem = oldMap.get(item.id);
+        
+        if (!oldItem) {
+          // Newly added item: set updated_at if not already present
+          return {
+            ...item,
+            updated_at: item.updated_at || nowIso
+          };
+        } else {
+          // Existing item: compare fields to see if it changed
+          const hasChanged = Object.keys(item).some(k => {
+            if (k === 'updated_at') return false;
+            return JSON.stringify(item[k]) !== JSON.stringify(oldItem[k]);
+          });
+          
+          if (hasChanged) {
+            return {
+              ...item,
+              updated_at: nowIso
+            };
+          } else {
+            // No change: keep existing updated_at or fallback
+            return {
+              ...item,
+              updated_at: item.updated_at || oldItem.updated_at || nowIso
+            };
+          }
+        }
+      }
+      return item;
+    });
+  }
+
+  localStorage.setItem(key, JSON.stringify(finalValue));
   // Queue asynchronous background auto-save to Supabase
-  queueAutoPush(key, value);
+  queueAutoPush(key, finalValue);
 }
 
 // Log actions
