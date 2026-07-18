@@ -109,33 +109,88 @@ function mergeArrays(local: any[], remote: any[]): any[] {
 }
 
 async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
-  const { data: remoteRow, error: fetchError } = await supabase
-    .from('merdeka_store')
-    .select('value')
-    .eq('key', key)
-    .maybeSingle();
+  const maxRetries = 10;
+  let attempt = 0;
 
-  let finalData = localData;
+  while (attempt < maxRetries) {
+    attempt++;
+    
+    // 1. Fetch current remote state
+    const { data: remoteRow, error: fetchError } = await supabase
+      .from('merdeka_store')
+      .select('value, updated_at')
+      .eq('key', key)
+      .maybeSingle();
 
-  if (!fetchError && remoteRow && remoteRow.value && Array.isArray(remoteRow.value) && Array.isArray(localData)) {
-    finalData = mergeArrays(localData, remoteRow.value);
+    if (fetchError) {
+      console.error(`[fetchMergeAndSave] Fetch error for key ${key}:`, fetchError);
+      // Wait a bit and retry
+      await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
+      continue;
+    }
+
+    const nowIso = new Date().toISOString();
+    let finalData = localData;
+
+    if (remoteRow) {
+      // Remote row exists. Let's merge.
+      if (remoteRow.value && Array.isArray(remoteRow.value) && Array.isArray(localData)) {
+        finalData = mergeArrays(localData, remoteRow.value);
+      }
+      
+      // 2. Try to update conditionally using the fetched updated_at to ensure no race condition
+      const { data: updateData, error: updateError } = await supabase
+        .from('merdeka_store')
+        .update({
+          value: finalData,
+          updated_at: nowIso
+        })
+        .eq('key', key)
+        .eq('updated_at', remoteRow.updated_at)
+        .select();
+
+      if (updateError) {
+        console.warn(`[fetchMergeAndSave] Update error on attempt ${attempt}:`, updateError);
+        await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
+        continue;
+      }
+
+      // If no rows were updated (updateData is empty or null), it means updated_at changed under us!
+      if (!updateData || updateData.length === 0) {
+        console.warn(`[fetchMergeAndSave] Concurrency conflict detected for key ${key} on attempt ${attempt}. Retrying...`);
+        // Jittered backoff
+        await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 150));
+        continue;
+      }
+
+      // Success! Update localStorage with the merged data
+      localStorage.setItem(key, JSON.stringify(finalData));
+      return finalData;
+
+    } else {
+      // Remote row does not exist. Try to insert.
+      const { error: insertError } = await supabase
+        .from('merdeka_store')
+        .insert({
+          key: key,
+          value: finalData,
+          updated_at: nowIso
+        });
+
+      if (insertError) {
+        // If insert failed due to duplicate key, someone else inserted it first. Retry!
+        console.warn(`[fetchMergeAndSave] Insert failed for key ${key} on attempt ${attempt} (likely duplicate). Retrying...`, insertError);
+        await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
+        continue;
+      }
+
+      // Success! Update localStorage
+      localStorage.setItem(key, JSON.stringify(finalData));
+      return finalData;
+    }
   }
 
-  const { error: upsertError } = await supabase
-    .from('merdeka_store')
-    .upsert({
-      key: key,
-      value: finalData,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'key' });
-
-  if (upsertError) {
-    throw upsertError;
-  }
-
-  // Persist the merged data to localStorage
-  localStorage.setItem(key, JSON.stringify(finalData));
-  return finalData;
+  throw new Error(`Gagal menyimpan data "${key}" setelah ${maxRetries} percobaan karena konflik sinkronisasi.`);
 }
 
 export async function pushToSupabase(): Promise<boolean> {
