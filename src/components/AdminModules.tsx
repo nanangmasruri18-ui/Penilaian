@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   db, logAudit, getActiveContext 
 } from '../db';
@@ -189,6 +189,16 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
 
     onRefreshStats();
   };
+
+  useEffect(() => {
+    const handleDbSynced = () => {
+      syncState();
+    };
+    window.addEventListener('merdeka_db_synced', handleDbSynced);
+    return () => {
+      window.removeEventListener('merdeka_db_synced', handleDbSynced);
+    };
+  }, []);
 
   // --- Modal Forms State ---
   const [isModalOpen, setIsModalOpen] = useState(false);

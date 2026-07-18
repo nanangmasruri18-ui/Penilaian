@@ -187,8 +187,10 @@ export function saveFormativeGrades(
               item.tahun === yearId
     );
 
+    const nowIso = new Date().toISOString();
     if (existingIndex > -1) {
       updated[existingIndex].nilai = g.nilai;
+      updated[existingIndex].updated_at = nowIso;
     } else {
       updated.push({
         id: 'fs-' + Date.now() + Math.random().toString(36).substr(2, 4),
@@ -196,7 +198,8 @@ export function saveFormativeGrades(
         tp_id: g.tp_id,
         nilai: g.nilai,
         semester: semesterId,
-        tahun: yearId
+        tahun: yearId,
+        updated_at: nowIso
       });
     }
   });
@@ -223,8 +226,10 @@ export function saveSummativeScopeGrades(
               item.tahun === yearId
     );
 
+    const nowIso = new Date().toISOString();
     if (existingIndex > -1) {
       updated[existingIndex].nilai = g.nilai;
+      updated[existingIndex].updated_at = nowIso;
     } else {
       updated.push({
         id: 'sss-' + Date.now() + Math.random().toString(36).substr(2, 4),
@@ -232,7 +237,8 @@ export function saveSummativeScopeGrades(
         lingkup_id: g.lingkup_id,
         nilai: g.nilai,
         semester: semesterId,
-        tahun: yearId
+        tahun: yearId,
+        updated_at: nowIso
       });
     }
   });
@@ -259,8 +265,10 @@ export function saveSemesterGrades(
               item.tahun === yearId
     );
 
+    const nowIso = new Date().toISOString();
     if (existingIndex > -1) {
       updated[existingIndex].nilai = g.nilai;
+      updated[existingIndex].updated_at = nowIso;
     } else {
       updated.push({
         id: 'ses-' + Date.now() + Math.random().toString(36).substr(2, 4),
@@ -268,7 +276,8 @@ export function saveSemesterGrades(
         subject_id: g.subject_id,
         nilai: g.nilai,
         semester: semesterId,
-        tahun: yearId
+        tahun: yearId,
+        updated_at: nowIso
       });
     }
   });

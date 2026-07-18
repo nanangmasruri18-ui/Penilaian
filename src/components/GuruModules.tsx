@@ -52,6 +52,16 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     onRefreshStats();
   };
 
+  useEffect(() => {
+    const handleDbSynced = () => {
+      syncState();
+    };
+    window.addEventListener('merdeka_db_synced', handleDbSynced);
+    return () => {
+      window.removeEventListener('merdeka_db_synced', handleDbSynced);
+    };
+  }, []);
+
   // State for forms & modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'add' | 'edit' | 'delete'>('add');

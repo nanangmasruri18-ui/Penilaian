@@ -78,6 +78,66 @@ function setSyncStatus(status: SyncStatus) {
  * If the table does not exist yet or fails, we provide helpful error reporting
  * so the user knows they need to set up the table, or we can fallback gracefully.
  */
+function mergeArrays(local: any[], remote: any[]): any[] {
+  const mergedMap = new Map<string, any>();
+  
+  // 1. Add remote items
+  remote.forEach(item => {
+    if (item && typeof item === 'object' && 'id' in item) {
+      mergedMap.set(item.id, item);
+    }
+  });
+  
+  // 2. Overwrite with local items if local is newer (Last-Write-Wins)
+  local.forEach(localItem => {
+    if (localItem && typeof localItem === 'object' && 'id' in localItem) {
+      const remoteItem = mergedMap.get(localItem.id);
+      if (!remoteItem) {
+        mergedMap.set(localItem.id, localItem);
+      } else {
+        const localTime = localItem.updated_at ? new Date(localItem.updated_at).getTime() : 0;
+        const remoteTime = remoteItem.updated_at ? new Date(remoteItem.updated_at).getTime() : 0;
+        
+        if (localTime >= remoteTime) {
+          mergedMap.set(localItem.id, localItem);
+        }
+      }
+    }
+  });
+  
+  return Array.from(mergedMap.values());
+}
+
+async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
+  const { data: remoteRow, error: fetchError } = await supabase
+    .from('merdeka_store')
+    .select('value')
+    .eq('key', key)
+    .maybeSingle();
+
+  let finalData = localData;
+
+  if (!fetchError && remoteRow && remoteRow.value && Array.isArray(remoteRow.value) && Array.isArray(localData)) {
+    finalData = mergeArrays(localData, remoteRow.value);
+  }
+
+  const { error: upsertError } = await supabase
+    .from('merdeka_store')
+    .upsert({
+      key: key,
+      value: finalData,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'key' });
+
+  if (upsertError) {
+    throw upsertError;
+  }
+
+  // Persist the merged data to localStorage
+  localStorage.setItem(key, JSON.stringify(finalData));
+  return finalData;
+}
+
 export async function pushToSupabase(): Promise<boolean> {
   setSyncStatus({ status: 'syncing', lastSync: getSyncStatus().lastSync, errorMessage: null });
   
@@ -93,18 +153,7 @@ export async function pushToSupabase(): Promise<boolean> {
         continue;
       }
 
-      // Upsert into 'merdeka_store' table
-      const { error } = await supabase
-        .from('merdeka_store')
-        .upsert({ 
-          key: key, 
-          value: parsed,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'key' });
-
-      if (error) {
-        throw new Error(`Gagal menyimpan tabel "${key}": ${error.message}`);
-      }
+      await fetchMergeAndSave(key, parsed);
     }
 
     setSyncStatus({
@@ -112,6 +161,9 @@ export async function pushToSupabase(): Promise<boolean> {
       lastSync: new Date().toISOString(),
       errorMessage: null
     });
+    
+    // Notify React components to sync local states
+    window.dispatchEvent(new Event('merdeka_db_synced'));
     return true;
   } catch (err: any) {
     console.error('Supabase Push Error:', err);
@@ -176,6 +228,8 @@ export async function pullFromSupabase(): Promise<boolean> {
   }
 }
 
+const queuePromises: Record<string, Promise<any>> = {};
+
 /**
  * Background auto-push function for individual table mutations.
  * Doesn't block the UI, silent execution.
@@ -183,15 +237,18 @@ export async function pullFromSupabase(): Promise<boolean> {
 export async function queueAutoPush(key: string, data: any): Promise<void> {
   if (!SYNC_KEYS.includes(key)) return;
   
-  try {
-    await supabase
-      .from('merdeka_store')
-      .upsert({
-        key: key,
-        value: data,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'key' });
-  } catch (err) {
-    console.warn(`[Supabase Auto-Push] Failed to auto-save key "${key}":`, err);
-  }
+  // Chain onto the parent promise to serialize background saves and prevent concurrent overlapping calls
+  const parentPromise = queuePromises[key] || Promise.resolve();
+  
+  const currentPromise = parentPromise.then(async () => {
+    try {
+      await fetchMergeAndSave(key, data);
+      window.dispatchEvent(new Event('merdeka_db_synced'));
+    } catch (err) {
+      console.warn(`[Supabase Auto-Push] Failed to auto-save key "${key}":`, err);
+    }
+  });
+  
+  queuePromises[key] = currentPromise;
+  await currentPromise;
 }

@@ -44,6 +44,7 @@ export interface LearningObjective { // TP
   class_id: string;
   kode: string; // e.g. "TP 1"
   deskripsi: string;
+  updated_at?: string;
 }
 
 export interface MaterialScope { // Lingkup Materi
@@ -51,6 +52,7 @@ export interface MaterialScope { // Lingkup Materi
   subject_id: string;
   class_id: string;
   nama: string; // e.g. "Bilangan Pecahan"
+  updated_at?: string;
 }
 
 export interface FormativeScore {
@@ -60,6 +62,7 @@ export interface FormativeScore {
   nilai: number; // 0-100
   semester: string; // semester id or code
   tahun: string; // academic year id or code
+  updated_at?: string;
 }
 
 export interface SummativeScopeScore {
@@ -69,6 +72,7 @@ export interface SummativeScopeScore {
   nilai: number; // 0-100
   semester: string;
   tahun: string;
+  updated_at?: string;
 }
 
 export interface SemesterScore {
@@ -78,6 +82,7 @@ export interface SemesterScore {
   nilai: number; // 0-100 (SAS score)
   semester: string;
   tahun: string;
+  updated_at?: string;
 }
 
 export interface AcademicYear {
