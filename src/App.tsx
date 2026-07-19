@@ -372,7 +372,7 @@ export default function App() {
     { id: 'assignment', label: 'Penugasan Guru', icon: Sliders },
     { id: 'rekap', label: 'Rekapitulasi Nilai', icon: FileText },
     { id: 'supabase', label: 'Database Supabase', icon: Database },
-    { id: 'logs', label: 'Log Aktivitas', icon: History },
+    { id: 'logs', label: 'Monitoring Pengisian', icon: History },
     { id: 'profil', label: 'Profil Saya', icon: User }
   ];
 
@@ -822,8 +822,8 @@ export default function App() {
                             <span className="text-[10px] text-slate-400 mt-1 block">Atur kelas mapel</span>
                           </button>
                           <button onClick={() => setActiveTab('logs')} className="p-4 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 rounded-2xl text-left hover:border-indigo-200 hover:shadow-md transition-all">
-                            <span className="font-bold text-slate-800 dark:text-slate-200 block text-xs">Log Aktivitas</span>
-                            <span className="text-[10px] text-slate-400 mt-1 block">Sistem Audit Log</span>
+                            <span className="font-bold text-slate-800 dark:text-slate-200 block text-xs">Monitoring Guru</span>
+                            <span className="text-[10px] text-slate-400 mt-1 block">Progres Pengisian</span>
                           </button>
                         </>
                       ) : (

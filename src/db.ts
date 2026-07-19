@@ -131,15 +131,23 @@ function set<T>(key: string, value: T): void {
 
 // Log actions
 export function logAudit(user: string, action: string) {
-  const logs = get<AuditLog[]>(KEYS.AUDIT_LOGS, []);
-  const newLog: AuditLog = {
-    id: 'log-' + Date.now() + Math.random().toString(36).substr(2, 4),
-    user,
-    action,
-    timestamp: new Date().toISOString()
-  };
-  set(KEYS.AUDIT_LOGS, [newLog, ...logs]);
+  // Detail logs are disabled to save storage space
 }
+
+// Clear old audit logs if present to free up storage space and sync the empty array to Supabase
+try {
+  const existing = localStorage.getItem(KEYS.AUDIT_LOGS);
+  if (existing && existing !== '[]') {
+    localStorage.setItem(KEYS.AUDIT_LOGS, '[]');
+    setTimeout(() => {
+      try {
+        queueAutoPush(KEYS.AUDIT_LOGS, []);
+      } catch (err) {
+        console.warn('Failed to sync empty audit logs:', err);
+      }
+    }, 1000);
+  }
+} catch (e) {}
 
 // --- Getter API ---
 export const db = {
@@ -182,7 +190,7 @@ export const db = {
   getSemesterScores: () => get<SemesterScore[]>(KEYS.SEMESTER_SCORES, []),
   setSemesterScores: (data: SemesterScore[]) => set(KEYS.SEMESTER_SCORES, data),
 
-  getAuditLogs: () => get<AuditLog[]>(KEYS.AUDIT_LOGS, []),
+  getAuditLogs: () => [] as AuditLog[],
   
   getSession: () => get<Profile | null>(KEYS.SESSION, null),
   setSession: (profile: Profile | null) => set(KEYS.SESSION, profile)
