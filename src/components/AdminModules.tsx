@@ -4,7 +4,7 @@ import {
 } from '../db';
 import { 
   Profile, Teacher, Class, Subject, Student, TeacherAssignment, 
-  AcademicYear, Semester, AuditLog, LearningObjective, MaterialScope,
+  AcademicYear, Semester, LearningObjective, MaterialScope,
   FormativeScore, SummativeScopeScore, SemesterScore
 } from '../types';
 import { Modal } from './Modal';
@@ -14,34 +14,6 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Upload, CheckCircle2, AlertCircle, FileText, Download,
   Printer, FileSpreadsheet, User, Save, Eye, EyeOff, History
 } from 'lucide-react';
-
-const getLogCategory = (action: string) => {
-  if (action.includes('TP')) {
-    return {
-      label: 'Tujuan Pembelajaran (TP)',
-      color: 'bg-indigo-50/70 text-indigo-700 border-indigo-100/50 dark:bg-indigo-950/20 dark:text-indigo-400 dark:border-indigo-900/30',
-      iconColor: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400',
-      type: 'tp' as const
-    };
-  }
-  if (action.toLowerCase().includes('lingkup materi')) {
-    return {
-      label: 'Lingkup Materi (LM)',
-      color: 'bg-amber-50/70 text-amber-700 border-amber-100/50 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30',
-      iconColor: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
-      type: 'lm' as const
-    };
-  }
-  if (action.toLowerCase().includes('nilai')) {
-    return {
-      label: 'Input Nilai',
-      color: 'bg-emerald-50/70 text-emerald-750 border-emerald-100/50 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30',
-      iconColor: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400',
-      type: 'nilai' as const
-    };
-  }
-  return null;
-};
 
 interface AdminModulesProps {
   currentTab: string;
@@ -59,7 +31,6 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
   const [assignments, setAssignments] = useState<TeacherAssignment[]>(() => db.getAssignments());
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>(() => db.getAcademicYears());
   const [semesters, setSemesters] = useState<Semester[]>(() => db.getSemesters());
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => db.getAuditLogs());
 
   // Additional grade ledger entities for rekapitulasi
   const [tps, setTps] = useState<LearningObjective[]>(() => db.getLearningObjectives());
@@ -103,9 +74,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
   });
   const [profilePass, setProfilePass] = useState<string>('');
   const [showPass, setShowPass] = useState<boolean>(false);
-  const [selectedLogType, setSelectedLogType] = useState<'all' | 'tp' | 'lm' | 'nilai'>('all');
   const [expandedTeachers, setExpandedTeachers] = useState<string[]>([]);
-  const [showDetailedLogs, setShowDetailedLogs] = useState<boolean>(false);
   const [searchTeacherQuery, setSearchTeacherQuery] = useState<string>('');
 
   const handleKepsekNameChange = (val: string) => {
@@ -176,7 +145,6 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     setAssignments(db.getAssignments());
     setAcademicYears(db.getAcademicYears());
     setSemesters(db.getSemesters());
-    setAuditLogs(db.getAuditLogs());
     setTps(db.getLearningObjectives());
     setScopes(db.getMaterialScopes());
     setFormativeScores(db.getFormativeScores());
@@ -1103,12 +1071,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     else if (currentTab === 'academic-year') currentSet = academicYears;
     else if (currentTab === 'semester') currentSet = semesters;
     else if (currentTab === 'logs') {
-      currentSet = auditLogs.filter(l => {
-        const cat = getLogCategory(l.action);
-        if (!cat) return false;
-        if (selectedLogType === 'all') return true;
-        return cat.type === selectedLogType;
-      });
+      currentSet = [];
     }
 
     // Sorting implementation
@@ -1131,7 +1094,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
       totalItems: currentSet.length,
       totalPages: Math.ceil(currentSet.length / itemsPerPage) || 1
     };
-  }, [currentTab, filteredTeachers, filteredClasses, filteredStudents, filteredSubjects, filteredAssignments, academicYears, semesters, auditLogs, sortField, sortDirection, currentPage, selectedLogType]);
+  }, [currentTab, filteredTeachers, filteredClasses, filteredStudents, filteredSubjects, filteredAssignments, academicYears, semesters, sortField, sortDirection, currentPage]);
 
 
   return (
