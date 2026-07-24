@@ -130,14 +130,9 @@ async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
     }
 
     const nowIso = new Date().toISOString();
-    let finalData = localData;
+    const finalData = localData;
 
     if (remoteRow) {
-      // Remote row exists. Let's merge.
-      if (remoteRow.value && Array.isArray(remoteRow.value) && Array.isArray(localData)) {
-        finalData = mergeArrays(localData, remoteRow.value);
-      }
-      
       // 2. Try to update conditionally using the fetched updated_at to ensure no race condition
       let query = supabase
         .from('merdeka_store')
