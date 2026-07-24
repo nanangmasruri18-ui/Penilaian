@@ -247,36 +247,56 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
   };
 
   // Submit CRUD for TP & Material Scopes
-  const handleCrudSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!session) return;
+  const handleCrudSubmit = (e?: React.FormEvent | React.MouseEvent) => {
+    if (e) e.preventDefault();
+    const userName = session?.nama || 'Guru';
 
     if (modalType === 'delete') {
       if (targetEntity === 'tp') {
-        const item = tps.find(x => x.id === selectedId);
+        const currentTps = db.getLearningObjectives();
+        const item = currentTps.find(x => String(x.id) === String(selectedId)) || tps.find(x => String(x.id) === String(selectedId));
         if (item) {
-          const updated = tps.filter(x => x.id !== selectedId);
+          const updated = currentTps.filter(x => String(x.id) !== String(selectedId));
           db.setLearningObjectives(updated);
+          setTps(updated);
           
           // Clean up scores linked to this TP
-          const updatedScores = formativeScores.filter(s => s.tp_id !== selectedId);
+          const currentScores = db.getFormativeScores();
+          const updatedScores = currentScores.filter(s => String(s.tp_id) !== String(selectedId));
           db.setFormativeScores(updatedScores);
+          setFormativeScores(updatedScores);
 
-          logAudit(session.nama, `Menghapus TP: ${item.kode} - ${item.deskripsi.substring(0, 30)}...`);
+          if (activeTpId === selectedId) {
+            setActiveTpId('');
+          }
+
+          logAudit(userName, `Menghapus TP: ${item.kode} - ${item.deskripsi.substring(0, 30)}...`);
           addToast('success', 'TP Dihapus', 'Tujuan Pembelajaran berhasil dihapus beserta seluruh nilainya.');
+        } else {
+          addToast('error', 'Gagal Hapus', 'Data Tujuan Pembelajaran tidak ditemukan.');
         }
       } else if (targetEntity === 'scope') {
-        const item = scopes.find(x => x.id === selectedId);
+        const currentScopes = db.getMaterialScopes();
+        const item = currentScopes.find(x => String(x.id) === String(selectedId)) || scopes.find(x => String(x.id) === String(selectedId));
         if (item) {
-          const updated = scopes.filter(x => x.id !== selectedId);
+          const updated = currentScopes.filter(x => String(x.id) !== String(selectedId));
           db.setMaterialScopes(updated);
+          setScopes(updated);
 
           // Clean up summatives linked to this scope
-          const updatedSumScores = summativeScores.filter(s => s.lingkup_id !== selectedId);
+          const currentSumScores = db.getSummativeScopeScores();
+          const updatedSumScores = currentSumScores.filter(s => String(s.lingkup_id) !== String(selectedId));
           db.setSummativeScopeScores(updatedSumScores);
+          setSummativeScores(updatedSumScores);
 
-          logAudit(session.nama, `Menghapus Lingkup Materi: ${item.nama}`);
+          if (activeScopeId === selectedId) {
+            setActiveScopeId('');
+          }
+
+          logAudit(userName, `Menghapus Lingkup Materi: ${item.nama}`);
           addToast('success', 'Lingkup Materi Dihapus', 'Lingkup materi berhasil dihapus.');
+        } else {
+          addToast('error', 'Gagal Hapus', 'Data Lingkup Materi tidak ditemukan.');
         }
       }
 
@@ -297,9 +317,11 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
         return;
       }
 
+      const currentTps = db.getLearningObjectives();
+
       if (modalType === 'add') {
         // Check duplicate code in same class + subject
-        const duplicate = tps.some(tp => tp.class_id === classId && tp.subject_id === subjectId && tp.kode.toLowerCase() === code.toLowerCase());
+        const duplicate = currentTps.some(tp => tp.class_id === classId && tp.subject_id === subjectId && tp.kode.toLowerCase() === code.toLowerCase());
         if (duplicate) {
           addToast('error', 'Kode Duplikat', `Kode ${code} sudah digunakan di mata pelajaran dan kelas terpilih.`);
           return;
@@ -313,20 +335,23 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
           deskripsi: desc
         };
 
-        db.setLearningObjectives([...tps, newTp]);
-        logAudit(session.nama, `Membuat TP Baru: ${code} - ${desc.substring(0, 40)}`);
+        const updated = [...currentTps, newTp];
+        db.setLearningObjectives(updated);
+        setTps(updated);
+        logAudit(userName, `Membuat TP Baru: ${code} - ${desc.substring(0, 40)}`);
         addToast('success', 'TP Ditambahkan', `Tujuan Pembelajaran ${code} berhasil disimpan.`);
       } else {
-        const otherTps = tps.filter(tp => tp.id !== selectedId);
+        const otherTps = currentTps.filter(tp => String(tp.id) !== String(selectedId));
         const duplicate = otherTps.some(tp => tp.class_id === classId && tp.subject_id === subjectId && tp.kode.toLowerCase() === code.toLowerCase());
         if (duplicate) {
           addToast('error', 'Kode Duplikat', `Kode ${code} sudah terdaftar.`);
           return;
         }
 
-        const updated = tps.map(tp => tp.id === selectedId ? { ...tp, class_id: classId, subject_id: subjectId, kode: code, deskripsi: desc } : tp);
+        const updated = currentTps.map(tp => String(tp.id) === String(selectedId) ? { ...tp, class_id: classId, subject_id: subjectId, kode: code, deskripsi: desc } : tp);
         db.setLearningObjectives(updated);
-        logAudit(session.nama, `Mengubah TP: ${code}`);
+        setTps(updated);
+        logAudit(userName, `Mengubah TP: ${code}`);
         addToast('success', 'TP Diperbarui', `Tujuan Pembelajaran ${code} berhasil diubah.`);
       }
     } 
@@ -341,8 +366,10 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
         return;
       }
 
+      const currentScopes = db.getMaterialScopes();
+
       if (modalType === 'add') {
-        const duplicate = scopes.some(sc => sc.class_id === classId && sc.subject_id === subjectId && sc.nama.toLowerCase() === name.toLowerCase());
+        const duplicate = currentScopes.some(sc => sc.class_id === classId && sc.subject_id === subjectId && sc.nama.toLowerCase() === name.toLowerCase());
         if (duplicate) {
           addToast('error', 'Nama Duplikat', 'Lingkup Materi tersebut sudah terdaftar.');
           return;
@@ -355,20 +382,23 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
           nama: name
         };
 
-        db.setMaterialScopes([...scopes, newScope]);
-        logAudit(session.nama, `Membuat Lingkup Materi Baru: ${name}`);
+        const updated = [...currentScopes, newScope];
+        db.setMaterialScopes(updated);
+        setScopes(updated);
+        logAudit(userName, `Membuat Lingkup Materi Baru: ${name}`);
         addToast('success', 'Lingkup Materi Disimpan', `Lingkup materi berhasil ditambahkan.`);
       } else {
-        const otherScopes = scopes.filter(sc => sc.id !== selectedId);
+        const otherScopes = currentScopes.filter(sc => String(sc.id) !== String(selectedId));
         const duplicate = otherScopes.some(sc => sc.class_id === classId && sc.subject_id === subjectId && sc.nama.toLowerCase() === name.toLowerCase());
         if (duplicate) {
           addToast('error', 'Nama Duplikat', 'Lingkup materi sudah terdaftar.');
           return;
         }
 
-        const updated = scopes.map(sc => sc.id === selectedId ? { ...sc, class_id: classId, subject_id: subjectId, nama: name } : sc);
+        const updated = currentScopes.map(sc => String(sc.id) === String(selectedId) ? { ...sc, class_id: classId, subject_id: subjectId, nama: name } : sc);
         db.setMaterialScopes(updated);
-        logAudit(session.nama, `Mengubah Lingkup Materi ke: ${name}`);
+        setScopes(updated);
+        logAudit(userName, `Mengubah Lingkup Materi ke: ${name}`);
         addToast('success', 'Lingkup Materi Diperbarui', 'Data lingkup materi berhasil diperbarui.');
       }
     }
