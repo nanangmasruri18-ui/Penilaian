@@ -11,7 +11,7 @@ import {
 import { Modal } from './Modal';
 import { 
   BookOpen, Layers, Plus, Edit, Trash2, Save, Sparkles, Check, 
-  FileSpreadsheet, Printer, FileText, Search, User, Lock, Eye, EyeOff
+  FileSpreadsheet, Printer, FileText, Search, User, Lock, Eye, EyeOff, Loader2
 } from 'lucide-react';
 
 interface GuruModulesProps {
@@ -75,12 +75,12 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
   const [activeTpId, setActiveTpId] = useState<string>('');
   const [activeScopeId, setActiveScopeId] = useState<string>('');
 
-  // Auto-Save notification states
-  const [savingStates, setSavingStates] = useState<{ [studentId: string]: 'idle' | 'saving' | 'saved' }>({});
+  // Grade saving states
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
+  const [isSavingGrades, setIsSavingGrades] = useState<boolean>(false);
 
-  // Local grades state to keep inputs completely responsive and stable
+  // Local grades state to keep inputs responsive and stable
   const [localGrades, setLocalGrades] = useState<Record<string, string>>({});
-  const saveTimeouts = useRef<Record<string, any>>({});
 
   useEffect(() => {
     const newGrades: Record<string, string> = {};
@@ -113,6 +113,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
       }
     }
     setLocalGrades(newGrades);
+    setHasUnsavedChanges(false);
   }, [
     currentTab, 
     activeTpId, 
@@ -445,54 +446,96 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     syncState();
   };
 
-  // --- Grade Input Handlers (Auto-Save on input change) ---
-  const handleGradeChange = (
-    studentId: string, 
-    value: string, 
-    type: 'formative' | 'summative-scope' | 'semester-score'
-  ) => {
-    // Update local state immediately for responsive/consistent typing
+  // --- Grade Input Handlers (Manual Save) ---
+  const handleGradeInputChange = (studentId: string, value: string) => {
     setLocalGrades(prev => ({ ...prev, [studentId]: value }));
+    setHasUnsavedChanges(true);
+  };
 
-    // Show saving animation
-    setSavingStates(prev => ({ ...prev, [studentId]: 'saving' }));
+  const handleSaveAllGrades = async () => {
+    if (!session) return;
+    setIsSavingGrades(true);
 
-    // Clear any previous scheduled saving for this student to prevent race conditions
-    if (saveTimeouts.current[studentId]) {
-      clearTimeout(saveTimeouts.current[studentId]);
-    }
+    const editorName = session.nama || 'Guru';
+    const semesterId = context.semester?.id || 'sem-ganjil';
+    const yearId = context.year?.id || 'th-2025';
 
-    // Debounce the save to local database (400ms is standard)
-    saveTimeouts.current[studentId] = setTimeout(() => {
-      const rawVal = parseInt(value, 10);
-      const score = isNaN(rawVal) ? 0 : Math.min(100, Math.max(0, rawVal));
+    try {
+      if (currentTab === 'formative') {
+        if (!activeTpId) {
+          addToast('error', 'Pilih TP', 'Harap pilih Tujuan Pembelajaran terlebih dahulu.');
+          setIsSavingGrades(false);
+          return;
+        }
 
-      const editorName = session?.nama || 'Guru';
-      const semesterId = context.semester?.id || 'sem-ganjil';
-      const yearId = context.year?.id || 'th-2025';
+        const gradesToSave: { student_id: string; tp_id: string; nilai: number }[] = [];
+        filteredStudents.forEach(student => {
+          const valStr = localGrades[student.id];
+          if (valStr !== undefined && valStr !== null && valStr.trim() !== '') {
+            const parsed = parseInt(valStr, 10);
+            if (!isNaN(parsed)) {
+              const score = Math.min(100, Math.max(0, parsed));
+              gradesToSave.push({ student_id: student.id, tp_id: activeTpId, nilai: score });
+            }
+          }
+        });
 
-      if (type === 'formative') {
-        if (!activeTpId) return;
-        saveFormativeGrades([{ student_id: studentId, tp_id: activeTpId, nilai: score }], semesterId, yearId, editorName);
-      } else if (type === 'summative-scope') {
-        if (!activeScopeId) return;
-        saveSummativeScopeGrades([{ student_id: studentId, lingkup_id: activeScopeId, nilai: score }], semesterId, yearId, editorName);
-      } else if (type === 'semester-score') {
-        if (!activeSubjectId) return;
-        saveSemesterGrades([{ student_id: studentId, subject_id: activeSubjectId, nilai: score }], semesterId, yearId, editorName);
+        saveFormativeGrades(gradesToSave, semesterId, yearId, editorName);
+        addToast('success', 'Nilai Formatif Disimpan', `Berhasil menyimpan ${gradesToSave.length} nilai formatif ke database.`);
+
+      } else if (currentTab === 'summative-scope') {
+        if (!activeScopeId) {
+          addToast('error', 'Pilih Lingkup Materi', 'Harap pilih Lingkup Materi terlebih dahulu.');
+          setIsSavingGrades(false);
+          return;
+        }
+
+        const gradesToSave: { student_id: string; lingkup_id: string; nilai: number }[] = [];
+        filteredStudents.forEach(student => {
+          const valStr = localGrades[student.id];
+          if (valStr !== undefined && valStr !== null && valStr.trim() !== '') {
+            const parsed = parseInt(valStr, 10);
+            if (!isNaN(parsed)) {
+              const score = Math.min(100, Math.max(0, parsed));
+              gradesToSave.push({ student_id: student.id, lingkup_id: activeScopeId, nilai: score });
+            }
+          }
+        });
+
+        saveSummativeScopeGrades(gradesToSave, semesterId, yearId, editorName);
+        addToast('success', 'Nilai Sumatif Disimpan', `Berhasil menyimpan ${gradesToSave.length} nilai sumatif lingkup materi ke database.`);
+
+      } else if (currentTab === 'sas') {
+        if (!activeSubjectId) {
+          addToast('error', 'Pilih Mapel', 'Harap pilih mata pelajaran terlebih dahulu.');
+          setIsSavingGrades(false);
+          return;
+        }
+
+        const gradesToSave: { student_id: string; subject_id: string; nilai: number }[] = [];
+        filteredStudents.forEach(student => {
+          const valStr = localGrades[student.id];
+          if (valStr !== undefined && valStr !== null && valStr.trim() !== '') {
+            const parsed = parseInt(valStr, 10);
+            if (!isNaN(parsed)) {
+              const score = Math.min(100, Math.max(0, parsed));
+              gradesToSave.push({ student_id: student.id, subject_id: activeSubjectId, nilai: score });
+            }
+          }
+        });
+
+        saveSemesterGrades(gradesToSave, semesterId, yearId, editorName);
+        addToast('success', 'Nilai SAS Disimpan', `Berhasil menyimpan ${gradesToSave.length} nilai SAS ke database.`);
       }
 
-      // Sync state and set saved flag
       syncState();
-      setSavingStates(prev => ({ ...prev, [studentId]: 'saved' }));
-
-      // Clean checkmark after 1.5 seconds
-      setTimeout(() => {
-        setSavingStates(prev => ({ ...prev, [studentId]: 'idle' }));
-      }, 1500);
-
-      delete saveTimeouts.current[studentId];
-    }, 400);
+      setHasUnsavedChanges(false);
+    } catch (err) {
+      console.error("Gagal menyimpan nilai:", err);
+      addToast('error', 'Gagal Menyimpan', 'Terjadi kesalahan saat menyimpan data nilai.');
+    } finally {
+      setIsSavingGrades(false);
+    }
   };
 
   // --- Copy semester scores helper ---
@@ -921,19 +964,46 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
         </div>
       )}
 
-      {/* --- FORMATIVE SCORE MODULE (Auto-saving) --- */}
+      {/* --- FORMATIVE SCORE MODULE (Manual Save) --- */}
       {currentTab === 'formative' && (
         <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-          <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+          <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <h3 className="text-base font-bold text-slate-800">Penginputan Nilai Formatif</h3>
-              <p className="text-xs text-slate-500 mt-1">Mengukur kemajuan siswa secara harian. Nilai otomatis tersimpan (Auto-Save).</p>
+              <p className="text-xs text-slate-500 mt-1">Mengukur kemajuan harian siswa per TP. Masukkan nilai lalu klik tombol <strong>Simpan Nilai Formatif</strong>.</p>
             </div>
             {activeTpId && (
-              <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4" />
-                Input Aktif TP
-              </span>
+              <div className="flex items-center gap-3">
+                {hasUnsavedChanges ? (
+                  <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-50 border border-amber-200 text-amber-700 flex items-center gap-1.5 animate-pulse">
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    Ada Perubahan Belum Disimpan
+                  </span>
+                ) : (
+                  <span className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-700 flex items-center gap-1.5">
+                    <Check className="w-4 h-4 text-emerald-600" />
+                    Tersimpan
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSaveAllGrades}
+                  disabled={isSavingGrades || !activeTpId || filteredStudents.length === 0}
+                  className="px-4 py-2 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white shadow-sm flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSavingGrades ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Menyimpan...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      Simpan Nilai Formatif
+                    </>
+                  )}
+                </button>
+              </div>
             )}
           </div>
 
@@ -944,84 +1014,124 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
               Harap buat Tujuan Pembelajaran terlebih dahulu melalui tab <strong>Input TP</strong>.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/50 border-b border-slate-100">
-                    <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-16">No</th>
-                    <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-40">NISN</th>
-                    <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Nama Lengkap Siswa</th>
-                    <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-40 text-center">Nilai Formatif (0-100)</th>
-                    <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-40 text-right">Status Simpan</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredStudents.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="text-center py-10 text-slate-400 text-sm">Tidak ada siswa terdaftar di kelas ini.</td>
+            <div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100">
+                      <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-16">No</th>
+                      <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-40">NISN</th>
+                      <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Nama Lengkap Siswa</th>
+                      <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-48 text-center">Nilai Formatif (0-100)</th>
                     </tr>
-                  ) : (
-                    filteredStudents.map((student, idx) => {
-                      // Get current formative score
-                      const scoreObj = formativeScores.find(
-                        s => s.student_id === student.id && 
-                             s.tp_id === activeTpId && 
-                             s.semester === (context.semester?.id || '') && 
-                             s.tahun === (context.year?.id || '')
-                      );
-                      const currentVal = scoreObj ? scoreObj.nilai : '';
-                      const saveState = savingStates[student.id] || 'idle';
-
-                      return (
-                        <tr key={student.id} className="hover:bg-slate-50/20 transition-colors">
-                          <td className="px-6 py-4 text-sm font-mono text-slate-400">{idx + 1}</td>
-                          <td className="px-6 py-4 text-sm font-mono text-slate-500">{student.nisn}</td>
-                          <td className="px-6 py-4 text-sm font-bold text-slate-800">{student.nama}</td>
-                          <td className="px-6 py-4 text-center">
-                            <input
-                              type="number"
-                              min={0}
-                              max={100}
-                              value={localGrades[student.id] ?? ''}
-                              onChange={(e) => handleGradeChange(student.id, e.target.value, 'formative')}
-                              className="w-24 text-center px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-semibold font-mono"
-                              placeholder="0"
-                            />
-                          </td>
-                          <td className="px-6 py-4 text-right text-xs">
-                            {saveState === 'saving' && (
-                              <span className="text-slate-400 font-medium flex items-center gap-1.5 justify-end font-mono">
-                                <span className="w-2 h-2 rounded-full bg-indigo-500 animate-ping"></span> Menulis...
-                              </span>
-                            )}
-                            {saveState === 'saved' && (
-                              <span className="text-emerald-600 font-bold flex items-center gap-1.5 justify-end">
-                                <Check className="w-4 h-4 text-emerald-500" /> Auto-Save
-                              </span>
-                            )}
-                            {saveState === 'idle' && (
-                              <span className="text-slate-300 font-mono">Tersimpan</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredStudents.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="text-center py-10 text-slate-400 text-sm">Tidak ada siswa terdaftar di kelas ini.</td>
+                      </tr>
+                    ) : (
+                      filteredStudents.map((student, idx) => {
+                        return (
+                          <tr key={student.id} className="hover:bg-slate-50/20 transition-colors">
+                            <td className="px-6 py-4 text-sm font-mono text-slate-400">{idx + 1}</td>
+                            <td className="px-6 py-4 text-sm font-mono text-slate-500">{student.nisn}</td>
+                            <td className="px-6 py-4 text-sm font-bold text-slate-800">{student.nama}</td>
+                            <td className="px-6 py-4 text-center">
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={localGrades[student.id] ?? ''}
+                                onChange={(e) => handleGradeInputChange(student.id, e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleSaveAllGrades();
+                                  }
+                                }}
+                                className="w-28 text-center px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-semibold font-mono bg-white shadow-sm"
+                                placeholder="0"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {filteredStudents.length > 0 && (
+                <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-3">
+                  <span className="text-xs font-medium text-slate-500">
+                    Total Siswa: <strong>{filteredStudents.length} Siswa</strong>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleSaveAllGrades}
+                    disabled={isSavingGrades || !activeTpId}
+                    className="w-full sm:w-auto px-6 py-2.5 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                  >
+                    {isSavingGrades ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Menyimpan Nilai...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        Simpan Nilai Formatif
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {/* --- SUMMATIVE SCOPE SCORE MODULE (Auto-saving) --- */}
+      {/* --- SUMMATIVE SCOPE SCORE MODULE (Manual Save) --- */}
       {currentTab === 'summative-scope' && (
         <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-          <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+          <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <h3 className="text-base font-bold text-slate-800">Nilai Sumatif Lingkup Materi</h3>
-              <p className="text-xs text-slate-500 mt-1">Input nilai akhir bab/materi pembelajaran kurikulum merdeka. (Auto-Save).</p>
+              <p className="text-xs text-slate-500 mt-1">Input nilai akhir bab/materi pembelajaran. Klik tombol <strong>Simpan Nilai Sumatif</strong> untuk memperbarui data.</p>
             </div>
+            {activeScopeId && (
+              <div className="flex items-center gap-3">
+                {hasUnsavedChanges ? (
+                  <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-50 border border-amber-200 text-amber-700 flex items-center gap-1.5 animate-pulse">
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    Ada Perubahan Belum Disimpan
+                  </span>
+                ) : (
+                  <span className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-700 flex items-center gap-1.5">
+                    <Check className="w-4 h-4 text-emerald-600" />
+                    Tersimpan
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSaveAllGrades}
+                  disabled={isSavingGrades || !activeScopeId || filteredStudents.length === 0}
+                  className="px-4 py-2 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white shadow-sm flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSavingGrades ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Menyimpan...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      Simpan Nilai Sumatif
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
 
           {!activeScopeId ? (
@@ -1031,6 +1141,127 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
               Sila buat Lingkup Materi terlebih dahulu melalui tab <strong>Input Lingkup Materi</strong>.
             </div>
           ) : (
+            <div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100">
+                      <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-16">No</th>
+                      <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-40">NISN</th>
+                      <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Nama Lengkap Siswa</th>
+                      <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-48 text-center">Nilai Sumatif Bab (0-100)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredStudents.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="text-center py-10 text-slate-400 text-sm">Tidak ada siswa terdaftar di kelas ini.</td>
+                      </tr>
+                    ) : (
+                      filteredStudents.map((student, idx) => {
+                        return (
+                          <tr key={student.id} className="hover:bg-slate-50/20 transition-colors">
+                            <td className="px-6 py-4 text-sm font-mono text-slate-400">{idx + 1}</td>
+                            <td className="px-6 py-4 text-sm font-mono text-slate-500">{student.nisn}</td>
+                            <td className="px-6 py-4 text-sm font-bold text-slate-800">{student.nama}</td>
+                            <td className="px-6 py-4 text-center">
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={localGrades[student.id] ?? ''}
+                                onChange={(e) => handleGradeInputChange(student.id, e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleSaveAllGrades();
+                                  }
+                                }}
+                                className="w-28 text-center px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-semibold font-mono bg-white shadow-sm"
+                                placeholder="0"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {filteredStudents.length > 0 && (
+                <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-3">
+                  <span className="text-xs font-medium text-slate-500">
+                    Total Siswa: <strong>{filteredStudents.length} Siswa</strong>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleSaveAllGrades}
+                    disabled={isSavingGrades || !activeScopeId}
+                    className="w-full sm:w-auto px-6 py-2.5 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                  >
+                    {isSavingGrades ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Menyimpan Nilai...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        Simpan Nilai Sumatif
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* --- SUMMATIVE SEMESTER SCORE MODULE (Manual Save) --- */}
+      {currentTab === 'sas' && (
+        <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+          <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <h3 className="text-base font-bold text-slate-800">Nilai Sumatif Akhir Semester (SAS)</h3>
+              <p className="text-xs text-slate-500 mt-1">Menginput nilai murni ujian akhir semester. Masukkan nilai lalu klik <strong>Simpan Nilai SAS</strong>.</p>
+            </div>
+            {activeSubjectId && (
+              <div className="flex items-center gap-3">
+                {hasUnsavedChanges ? (
+                  <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-50 border border-amber-200 text-amber-700 flex items-center gap-1.5 animate-pulse">
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    Ada Perubahan Belum Disimpan
+                  </span>
+                ) : (
+                  <span className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-700 flex items-center gap-1.5">
+                    <Check className="w-4 h-4 text-emerald-600" />
+                    Tersimpan
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSaveAllGrades}
+                  disabled={isSavingGrades || !activeSubjectId || filteredStudents.length === 0}
+                  className="px-4 py-2 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white shadow-sm flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSavingGrades ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Menyimpan...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      Simpan Nilai SAS
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div>
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
@@ -1038,26 +1269,16 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                     <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-16">No</th>
                     <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-40">NISN</th>
                     <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Nama Lengkap Siswa</th>
-                    <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-40 text-center">Nilai Sumatif Bab (0-100)</th>
-                    <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-40 text-right">Status Simpan</th>
+                    <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-48 text-center">Nilai Ujian SAS (0-100)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredStudents.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="text-center py-10 text-slate-400 text-sm">Tidak ada siswa terdaftar di kelas ini.</td>
+                      <td colSpan={4} className="text-center py-10 text-slate-400 text-sm">Tidak ada siswa terdaftar di kelas ini.</td>
                     </tr>
                   ) : (
                     filteredStudents.map((student, idx) => {
-                      const scoreObj = summativeScores.find(
-                        s => s.student_id === student.id && 
-                             s.lingkup_id === activeScopeId && 
-                             s.semester === (context.semester?.id || '') && 
-                             s.tahun === (context.year?.id || '')
-                      );
-                      const currentVal = scoreObj ? scoreObj.nilai : '';
-                      const saveState = savingStates[student.id] || 'idle';
-
                       return (
                         <tr key={student.id} className="hover:bg-slate-50/20 transition-colors">
                           <td className="px-6 py-4 text-sm font-mono text-slate-400">{idx + 1}</td>
@@ -1069,25 +1290,16 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                               min={0}
                               max={100}
                               value={localGrades[student.id] ?? ''}
-                              onChange={(e) => handleGradeChange(student.id, e.target.value, 'summative-scope')}
-                              className="w-24 text-center px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-semibold font-mono"
+                              onChange={(e) => handleGradeInputChange(student.id, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleSaveAllGrades();
+                                }
+                              }}
+                              className="w-28 text-center px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-semibold font-mono bg-white shadow-sm"
                               placeholder="0"
                             />
-                          </td>
-                          <td className="px-6 py-4 text-right text-xs">
-                            {saveState === 'saving' && (
-                              <span className="text-slate-400 font-medium flex items-center gap-1.5 justify-end font-mono">
-                                <span className="w-2 h-2 rounded-full bg-indigo-500 animate-ping"></span> Menulis...
-                              </span>
-                            )}
-                            {saveState === 'saved' && (
-                              <span className="text-emerald-600 font-bold flex items-center gap-1.5 justify-end">
-                                <Check className="w-4 h-4 text-emerald-500" /> Auto-Save
-                              </span>
-                            )}
-                            {saveState === 'idle' && (
-                              <span className="text-slate-300 font-mono">Tersimpan</span>
-                            )}
                           </td>
                         </tr>
                       );
@@ -1096,82 +1308,31 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                 </tbody>
               </table>
             </div>
-          )}
-        </div>
-      )}
-
-      {/* --- SUMMATIVE SEMESTER SCORE MODULE (Auto-saving) --- */}
-      {currentTab === 'sas' && (
-        <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-          <div className="p-6 border-b border-slate-100 bg-slate-50/50">
-            <h3 className="text-base font-bold text-slate-800">Nilai Sumatif Akhir Semester (SAS)</h3>
-            <p className="text-xs text-slate-500 mt-1">Menginput nilai murni ujian akhir semester untuk dikombinasikan ke dalam rekapitulasi nilai akhir. (Auto-Save).</p>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/50 border-b border-slate-100">
-                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-16">No</th>
-                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-40">NISN</th>
-                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider">Nama Lengkap Siswa</th>
-                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-40 text-center">Nilai Ujian SAS (0-100)</th>
-                  <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-400 tracking-wider w-40 text-right">Status Simpan</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredStudents.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="text-center py-10 text-slate-400 text-sm">Tidak ada siswa terdaftar di kelas ini.</td>
-                  </tr>
-                ) : (
-                  filteredStudents.map((student, idx) => {
-                    const scoreObj = semesterScores.find(
-                      s => s.student_id === student.id && 
-                           s.subject_id === activeSubjectId && 
-                           s.semester === (context.semester?.id || '') && 
-                           s.tahun === (context.year?.id || '')
-                    );
-                    const currentVal = scoreObj ? scoreObj.nilai : '';
-                    const saveState = savingStates[student.id] || 'idle';
-
-                    return (
-                      <tr key={student.id} className="hover:bg-slate-50/20 transition-colors">
-                        <td className="px-6 py-4 text-sm font-mono text-slate-400">{idx + 1}</td>
-                        <td className="px-6 py-4 text-sm font-mono text-slate-500">{student.nisn}</td>
-                        <td className="px-6 py-4 text-sm font-bold text-slate-800">{student.nama}</td>
-                        <td className="px-6 py-4 text-center">
-                          <input
-                            type="number"
-                            min={0}
-                            max={100}
-                            value={localGrades[student.id] ?? ''}
-                            onChange={(e) => handleGradeChange(student.id, e.target.value, 'semester-score')}
-                            className="w-24 text-center px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-semibold font-mono"
-                            placeholder="0"
-                          />
-                        </td>
-                        <td className="px-6 py-4 text-right text-xs">
-                          {saveState === 'saving' && (
-                            <span className="text-slate-400 font-medium flex items-center gap-1.5 justify-end font-mono">
-                              <span className="w-2 h-2 rounded-full bg-indigo-500 animate-ping"></span> Menulis...
-                            </span>
-                          )}
-                          {saveState === 'saved' && (
-                            <span className="text-emerald-600 font-bold flex items-center gap-1.5 justify-end">
-                              <Check className="w-4 h-4 text-emerald-500" /> Auto-Save
-                            </span>
-                          )}
-                          {saveState === 'idle' && (
-                            <span className="text-slate-300 font-mono">Tersimpan</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+            {filteredStudents.length > 0 && (
+              <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-3">
+                <span className="text-xs font-medium text-slate-500">
+                  Total Siswa: <strong>{filteredStudents.length} Siswa</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSaveAllGrades}
+                  disabled={isSavingGrades || !activeSubjectId}
+                  className="w-full sm:w-auto px-6 py-2.5 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                >
+                  {isSavingGrades ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Menyimpan Nilai...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      Simpan Nilai SAS
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

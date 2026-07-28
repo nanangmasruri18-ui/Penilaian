@@ -78,28 +78,51 @@ function setSyncStatus(status: SyncStatus) {
  * If the table does not exist yet or fails, we provide helpful error reporting
  * so the user knows they need to set up the table, or we can fallback gracefully.
  */
-function mergeArrays(local: any[], remote: any[]): any[] {
+function getItemKey(storeKey: string, item: any): string {
+  if (!item || typeof item !== 'object') return '';
+  if (storeKey === 'merdeka_formative_scores') {
+    if (item.student_id && item.tp_id && item.semester && item.tahun) {
+      return `${item.student_id}_${item.tp_id}_${item.semester}_${item.tahun}`;
+    }
+  } else if (storeKey === 'merdeka_summative_scope_scores') {
+    if (item.student_id && item.lingkup_id && item.semester && item.tahun) {
+      return `${item.student_id}_${item.lingkup_id}_${item.semester}_${item.tahun}`;
+    }
+  } else if (storeKey === 'merdeka_semester_scores') {
+    if (item.student_id && item.subject_id && item.semester && item.tahun) {
+      return `${item.student_id}_${item.subject_id}_${item.semester}_${item.tahun}`;
+    }
+  }
+  return item.id ? String(item.id) : '';
+}
+
+function mergeArrays(storeKey: string, local: any[], remote: any[]): any[] {
+  if (!Array.isArray(local)) return remote || [];
+  if (!Array.isArray(remote)) return local || [];
+
   const mergedMap = new Map<string, any>();
   
   // 1. Add remote items
-  remote.forEach(item => {
-    if (item && typeof item === 'object' && 'id' in item) {
-      mergedMap.set(item.id, item);
+  remote.forEach(remoteItem => {
+    const k = getItemKey(storeKey, remoteItem);
+    if (k) {
+      mergedMap.set(k, remoteItem);
     }
   });
   
-  // 2. Overwrite with local items if local is newer (Last-Write-Wins)
+  // 2. Overwrite with local items if local is newer or equal (Last-Write-Wins)
   local.forEach(localItem => {
-    if (localItem && typeof localItem === 'object' && 'id' in localItem) {
-      const remoteItem = mergedMap.get(localItem.id);
+    const k = getItemKey(storeKey, localItem);
+    if (k) {
+      const remoteItem = mergedMap.get(k);
       if (!remoteItem) {
-        mergedMap.set(localItem.id, localItem);
+        mergedMap.set(k, localItem);
       } else {
         const localTime = localItem.updated_at ? new Date(localItem.updated_at).getTime() : 0;
         const remoteTime = remoteItem.updated_at ? new Date(remoteItem.updated_at).getTime() : 0;
         
         if (localTime >= remoteTime) {
-          mergedMap.set(localItem.id, localItem);
+          mergedMap.set(k, { ...remoteItem, ...localItem });
         }
       }
     }
@@ -130,7 +153,13 @@ async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
     }
 
     const nowIso = new Date().toISOString();
-    const finalData = localData;
+    let finalData = localData;
+
+    if (remoteRow && remoteRow.value) {
+      if (Array.isArray(localData) && Array.isArray(remoteRow.value)) {
+        finalData = mergeArrays(key, localData, remoteRow.value);
+      }
+    }
 
     if (remoteRow) {
       // 2. Try to update conditionally using the fetched updated_at to ensure no race condition
@@ -166,6 +195,7 @@ async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
 
       // Success! Update localStorage with the merged data
       localStorage.setItem(key, JSON.stringify(finalData));
+      window.dispatchEvent(new Event('merdeka_db_synced'));
       return finalData;
 
     } else {
@@ -187,6 +217,7 @@ async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
 
       // Success! Update localStorage
       localStorage.setItem(key, JSON.stringify(finalData));
+      window.dispatchEvent(new Event('merdeka_db_synced'));
       return finalData;
     }
   }
