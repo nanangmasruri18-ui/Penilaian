@@ -292,18 +292,20 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
         }
       }
       else if (targetEntity === 'assignment') {
-        const a = assignments.find(item => item.id === selectedId);
-        if (a) {
-          const updatedA = assignments.filter(item => item.id !== selectedId);
-          db.setAssignments(updatedA);
+        const a = assignments.find(item => String(item.id) === String(selectedId));
+        const updatedA = assignments.filter(item => String(item.id) !== String(selectedId));
+        db.setAssignments(updatedA);
 
+        if (a) {
           const teacher = teachers.find(t => t.id === a.teacher_id);
           const cls = classes.find(c => c.id === a.class_id);
           const sub = subjects.find(s => s.id === a.subject_id);
 
           logAudit(activeUser, `Menghapus penugasan mengajar: ${teacher?.nama || 'Guru'} di ${cls?.nama || 'Kelas'} (${sub?.nama || 'Mapel'})`);
-          addToast('success', 'Berhasil Dihapus', `Penugasan mengajar telah dihapus.`);
+        } else {
+          logAudit(activeUser, `Menghapus penugasan mengajar ID: ${selectedId}`);
         }
+        addToast('success', 'Berhasil Dihapus', `Penugasan mengajar telah berhasil dihapus.`);
       }
       else if (targetEntity === 'academicYear') {
         const y = academicYears.find(item => item.id === selectedId);
@@ -901,6 +903,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
         const subPercentage = subTotalExpected > 0 ? Math.round((subTotalActual / subTotalExpected) * 100) : 0;
         
         return {
+          asgId: asg.id,
           classId: asg.class_id,
           subjectId: asg.subject_id,
           className: clsName,
@@ -1881,8 +1884,34 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
                                               <div className="font-bold text-xs text-slate-800">
                                                 {asgDetail.className} - {asgDetail.subjectName}
                                               </div>
-                                              <div className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
-                                                {asgDetail.subPercentage}% Terisi
+                                              <div className="flex items-center gap-1.5">
+                                                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                                                  {asgDetail.subPercentage}% Terisi
+                                                </span>
+                                                {asgDetail.asgId && (
+                                                  <div className="flex items-center gap-0.5 border-l border-slate-200 pl-1.5 ml-0.5">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => openModal('edit', 'assignment', asgDetail.asgId, {
+                                                        teacher_id: stat.teacher.id,
+                                                        class_id: asgDetail.classId,
+                                                        subject_id: asgDetail.subjectId
+                                                      })}
+                                                      className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                                                      title="Ubah Penugasan Guru"
+                                                    >
+                                                      <Edit className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => openModal('delete', 'assignment', asgDetail.asgId)}
+                                                      className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                                                      title="Hapus Penugasan Guru"
+                                                    >
+                                                      <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                  </div>
+                                                )}
                                               </div>
                                             </div>
 
@@ -2267,7 +2296,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
         isOpen={isModalOpen} 
         onClose={closeModal} 
         title={
-          modalType === 'delete' ? 'Konfirmasi Hapus Data' :
+          modalType === 'delete' ? (targetEntity === 'assignment' ? 'Konfirmasi Hapus Penugasan Guru' : 'Konfirmasi Hapus Data') :
           modalType === 'reset-pass' ? 'Reset Kata Sandi Akun' :
           modalType === 'add' ? `Tambah Data ${targetEntity === 'teacher' ? 'Guru' : targetEntity === 'class' ? 'Kelas' : targetEntity === 'student' ? 'Siswa' : targetEntity === 'subject' ? 'Mapel' : targetEntity === 'assignment' ? 'Penugasan' : 'Konfigurasi'}` :
           `Ubah Data ${targetEntity === 'teacher' ? 'Guru' : targetEntity === 'class' ? 'Kelas' : targetEntity === 'student' ? 'Siswa' : targetEntity === 'subject' ? 'Mapel' : targetEntity === 'assignment' ? 'Penugasan Guru' : 'Konfigurasi'}`
@@ -2276,7 +2305,10 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
         {modalType === 'delete' ? (
           <div className="space-y-4">
             <p className="text-sm text-slate-600 leading-relaxed">
-              Apakah Anda yakin ingin menghapus data ini secara permanen? Tindakan ini tidak dapat dibatalkan dan semua riwayat terkait mungkin akan ikut terhapus atau disesuaikan.
+              {targetEntity === 'assignment'
+                ? 'Apakah Anda yakin ingin menghapus penugasan mengajar ini? Guru yang bersangkutan tidak lagi ditugaskan di kelas dan mata pelajaran tersebut.'
+                : 'Apakah Anda yakin ingin menghapus data ini secara permanen? Tindakan ini tidak dapat dibatalkan dan semua riwayat terkait mungkin akan ikut terhapus atau disesuaikan.'
+              }
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <button 
