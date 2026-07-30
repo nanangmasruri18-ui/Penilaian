@@ -525,29 +525,52 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
         return;
       }
 
-      // Duplicate assignment check
-      const isDuplicate = assignments.some(a => 
-        a.teacher_id === teacherId && a.class_id === classId && a.subject_id === subjectId
-      );
+      if (modalType === 'add') {
+        // Duplicate assignment check
+        const isDuplicate = assignments.some(a => 
+          a.teacher_id === teacherId && a.class_id === classId && a.subject_id === subjectId
+        );
 
-      if (isDuplicate) {
-        addToast('error', 'Duplikasi Penugasan', 'Penugasan mengajar ini sudah terdaftar sebelumnya.');
-        return;
+        if (isDuplicate) {
+          addToast('error', 'Duplikasi Penugasan', 'Penugasan mengajar ini sudah terdaftar sebelumnya.');
+          return;
+        }
+
+        const newAsg: TeacherAssignment = {
+          id: 'asg-' + Date.now(),
+          teacher_id: teacherId,
+          class_id: classId,
+          subject_id: subjectId
+        };
+
+        db.setAssignments([...assignments, newAsg]);
+        const t = teachers.find(item => item.id === teacherId);
+        const c = classes.find(item => item.id === classId);
+        const s = subjects.find(item => item.id === subjectId);
+        logAudit(activeUser, `Menugaskan mengajar: ${t?.nama} mengajar ${s?.nama} di ${c?.nama}`);
+        addToast('success', 'Penugasan Berhasil', `Berhasil menugaskan ${t?.nama} mengajar ${s?.nama} di ${c?.nama}.`);
+      } else if (modalType === 'edit') {
+        // Duplicate assignment check (excluding current item)
+        const isDuplicate = assignments.some(a => 
+          a.id !== selectedId && a.teacher_id === teacherId && a.class_id === classId && a.subject_id === subjectId
+        );
+
+        if (isDuplicate) {
+          addToast('error', 'Duplikasi Penugasan', 'Penugasan mengajar ini sudah terdaftar sebelumnya.');
+          return;
+        }
+
+        const updated = assignments.map(a => 
+          a.id === selectedId ? { ...a, teacher_id: teacherId, class_id: classId, subject_id: subjectId } : a
+        );
+
+        db.setAssignments(updated);
+        const t = teachers.find(item => item.id === teacherId);
+        const c = classes.find(item => item.id === classId);
+        const s = subjects.find(item => item.id === subjectId);
+        logAudit(activeUser, `Memperbarui penugasan mengajar: ${t?.nama} mengajar ${s?.nama} di ${c?.nama}`);
+        addToast('success', 'Penugasan Diperbarui', `Berhasil memperbarui penugasan ${t?.nama} mengajar ${s?.nama} di ${c?.nama}.`);
       }
-
-      const newAsg: TeacherAssignment = {
-        id: 'asg-' + Date.now(),
-        teacher_id: teacherId,
-        class_id: classId,
-        subject_id: subjectId
-      };
-
-      db.setAssignments([...assignments, newAsg]);
-      const t = teachers.find(item => item.id === teacherId);
-      const c = classes.find(item => item.id === classId);
-      const s = subjects.find(item => item.id === subjectId);
-      logAudit(activeUser, `Menugaskan mengajar: ${t?.nama} mengajar ${s?.nama} di ${c?.nama}`);
-      addToast('success', 'Penugasan Berhasil', `Berhasil menugaskan ${t?.nama} mengajar ${s?.nama} di ${c?.nama}.`);
     }
 
     else if (targetEntity === 'academicYear') {
@@ -1512,12 +1535,28 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
                           </span>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => openModal('delete', 'assignment', a.id)}
-                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all rounded-xl"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => openModal('edit', 'assignment', a.id, {
+                                teacher_id: a.teacher_id,
+                                class_id: a.class_id,
+                                subject_id: a.subject_id
+                              })}
+                              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all rounded-xl"
+                              title="Edit Penugasan Guru"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openModal('delete', 'assignment', a.id)}
+                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all rounded-xl"
+                              title="Hapus Penugasan Guru"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -2231,7 +2270,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
           modalType === 'delete' ? 'Konfirmasi Hapus Data' :
           modalType === 'reset-pass' ? 'Reset Kata Sandi Akun' :
           modalType === 'add' ? `Tambah Data ${targetEntity === 'teacher' ? 'Guru' : targetEntity === 'class' ? 'Kelas' : targetEntity === 'student' ? 'Siswa' : targetEntity === 'subject' ? 'Mapel' : targetEntity === 'assignment' ? 'Penugasan' : 'Konfigurasi'}` :
-          `Ubah Data ${targetEntity === 'teacher' ? 'Guru' : targetEntity === 'class' ? 'Kelas' : targetEntity === 'student' ? 'Siswa' : targetEntity === 'subject' ? 'Mapel' : 'Konfigurasi'}`
+          `Ubah Data ${targetEntity === 'teacher' ? 'Guru' : targetEntity === 'class' ? 'Kelas' : targetEntity === 'student' ? 'Siswa' : targetEntity === 'subject' ? 'Mapel' : targetEntity === 'assignment' ? 'Penugasan Guru' : 'Konfigurasi'}`
         }
       >
         {modalType === 'delete' ? (
