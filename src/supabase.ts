@@ -153,13 +153,7 @@ async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
     }
 
     const nowIso = new Date().toISOString();
-    let finalData = localData;
-
-    if (remoteRow && remoteRow.value) {
-      if (Array.isArray(localData) && Array.isArray(remoteRow.value)) {
-        finalData = mergeArrays(key, localData, remoteRow.value);
-      }
-    }
+    const finalData = localData;
 
     if (remoteRow) {
       // 2. Try to update conditionally using the fetched updated_at to ensure no race condition
