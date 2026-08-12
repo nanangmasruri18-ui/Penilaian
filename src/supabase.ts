@@ -81,16 +81,22 @@ function setSyncStatus(status: SyncStatus) {
 function getItemKey(storeKey: string, item: any): string {
   if (!item || typeof item !== 'object') return '';
   if (storeKey === 'merdeka_formative_scores') {
-    if (item.student_id && item.tp_id && item.semester && item.tahun) {
-      return `${item.student_id}_${item.tp_id}_${item.semester}_${item.tahun}`;
+    if (item.student_id && item.tp_id) {
+      const sem = item.semester || 'sem-ganjil';
+      const yr = item.tahun || 'th-2025';
+      return `${item.student_id}_${item.tp_id}_${sem}_${yr}`;
     }
   } else if (storeKey === 'merdeka_summative_scope_scores') {
-    if (item.student_id && item.lingkup_id && item.semester && item.tahun) {
-      return `${item.student_id}_${item.lingkup_id}_${item.semester}_${item.tahun}`;
+    if (item.student_id && item.lingkup_id) {
+      const sem = item.semester || 'sem-ganjil';
+      const yr = item.tahun || 'th-2025';
+      return `${item.student_id}_${item.lingkup_id}_${sem}_${yr}`;
     }
   } else if (storeKey === 'merdeka_semester_scores') {
-    if (item.student_id && item.subject_id && item.semester && item.tahun) {
-      return `${item.student_id}_${item.subject_id}_${item.semester}_${item.tahun}`;
+    if (item.student_id && item.subject_id) {
+      const sem = item.semester || 'sem-ganjil';
+      const yr = item.tahun || 'th-2025';
+      return `${item.student_id}_${item.subject_id}_${sem}_${yr}`;
     }
   }
   return item.id ? String(item.id) : '';
@@ -153,9 +159,13 @@ async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
     }
 
     const nowIso = new Date().toISOString();
-    const finalData = localData;
+    let finalData = localData;
 
     if (remoteRow) {
+      if (remoteRow.value && Array.isArray(localData) && Array.isArray(remoteRow.value)) {
+        finalData = mergeArrays(key, localData, remoteRow.value);
+      }
+
       // 2. Try to update conditionally using the fetched updated_at to ensure no race condition
       let query = supabase
         .from('merdeka_store')
@@ -280,7 +290,17 @@ export async function pullFromSupabase(): Promise<boolean> {
     let updatedCount = 0;
     for (const row of data) {
       if (SYNC_KEYS.includes(row.key)) {
-        localStorage.setItem(row.key, JSON.stringify(row.value));
+        const localRaw = localStorage.getItem(row.key);
+        let finalVal = row.value;
+        if (localRaw) {
+          try {
+            const localParsed = JSON.parse(localRaw);
+            if (Array.isArray(localParsed) && Array.isArray(row.value)) {
+              finalVal = mergeArrays(row.key, localParsed, row.value);
+            }
+          } catch (e) {}
+        }
+        localStorage.setItem(row.key, JSON.stringify(finalVal));
         updatedCount++;
       }
     }

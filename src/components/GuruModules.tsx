@@ -82,7 +82,19 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
   // Local grades state to keep inputs responsive and stable
   const [localGrades, setLocalGrades] = useState<Record<string, string>>({});
 
+  // Selection key to detect when teacher switches tab or filter focus
+  const activeSelectionKey = `${currentTab}_${activeClassId}_${activeSubjectId}_${activeTpId}_${activeScopeId}_${context.semester?.id}_${context.year?.id}`;
+  const prevSelectionKeyRef = useRef<string>(activeSelectionKey);
+
   useEffect(() => {
+    const isSelectionChanged = prevSelectionKeyRef.current !== activeSelectionKey;
+    prevSelectionKeyRef.current = activeSelectionKey;
+
+    // If teacher hasn't changed tab/filters AND has unsaved edits, preserve their typed inputs!
+    if (!isSelectionChanged && hasUnsavedChanges) {
+      return;
+    }
+
     const newGrades: Record<string, string> = {};
     const semId = context.semester?.id || '';
     const yrId = context.year?.id || '';
@@ -115,10 +127,8 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     setLocalGrades(newGrades);
     setHasUnsavedChanges(false);
   }, [
-    currentTab, 
-    activeTpId, 
-    activeScopeId, 
-    activeSubjectId, 
+    activeSelectionKey,
+    hasUnsavedChanges,
     formativeScores, 
     summativeScores, 
     semesterScores, 
