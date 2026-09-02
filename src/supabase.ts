@@ -78,6 +78,16 @@ function setSyncStatus(status: SyncStatus) {
  * If the table does not exist yet or fails, we provide helpful error reporting
  * so the user knows they need to set up the table, or we can fallback gracefully.
  */
+// Only score tables use mergeArrays to support concurrent teacher grading
+export const SCORE_KEYS = [
+  'merdeka_formative_scores',
+  'merdeka_summative_scope_scores',
+  'merdeka_semester_scores'
+];
+
+/**
+ * Identify a composite unique key for score records to allow concurrent teacher grading without conflicts
+ */
 function getItemKey(storeKey: string, item: any): string {
   if (!item || typeof item !== 'object') return '';
   if (storeKey === 'merdeka_formative_scores') {
@@ -162,7 +172,7 @@ async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
     let finalData = localData;
 
     if (remoteRow) {
-      if (remoteRow.value && Array.isArray(localData) && Array.isArray(remoteRow.value)) {
+      if (SCORE_KEYS.includes(key) && remoteRow.value && Array.isArray(localData) && Array.isArray(remoteRow.value)) {
         finalData = mergeArrays(key, localData, remoteRow.value);
       }
 
@@ -292,7 +302,7 @@ export async function pullFromSupabase(): Promise<boolean> {
       if (SYNC_KEYS.includes(row.key)) {
         const localRaw = localStorage.getItem(row.key);
         let finalVal = row.value;
-        if (localRaw) {
+        if (localRaw && SCORE_KEYS.includes(row.key)) {
           try {
             const localParsed = JSON.parse(localRaw);
             if (Array.isArray(localParsed) && Array.isArray(row.value)) {

@@ -46,8 +46,39 @@ export function initializeDatabase(forceReset = false) {
     localStorage.setItem(KEYS.AUDIT_LOGS, JSON.stringify(seed.INITIAL_AUDIT_LOGS));
     
     if (forceReset) {
-      logAudit('System', 'Reset database ke seed data awal.');
+      logAudit('System', 'Reset database ke kondisi awal.');
     }
+    return true;
+  }
+  // Auto-run cleanup of any leftover dummy students from trial tests
+  cleanupDummyData();
+  return false;
+}
+
+// Clean up old dummy test data (e.g. seed students std-01..std-26 and orphaned scores)
+export function cleanupDummyData(): boolean {
+  const students = db.getStudents();
+  const dummyStudentIds = new Set<string>();
+  students.forEach(s => {
+    if (/^std-(0[1-9]|1[0-9]|2[0-6])$/.test(s.id)) {
+      dummyStudentIds.add(s.id);
+    }
+  });
+
+  if (dummyStudentIds.size > 0) {
+    const cleanedStudents = students.filter(s => !dummyStudentIds.has(s.id));
+    db.setStudents(cleanedStudents);
+
+    // Also clean any sample/trial scores associated with dummy students
+    const fScores = db.getFormativeScores().filter(fs => !dummyStudentIds.has(fs.student_id));
+    db.setFormativeScores(fScores);
+
+    const sScores = db.getSummativeScopeScores().filter(ss => !dummyStudentIds.has(ss.student_id));
+    db.setSummativeScopeScores(sScores);
+
+    const semScores = db.getSemesterScores().filter(ses => !dummyStudentIds.has(ses.student_id));
+    db.setSemesterScores(semScores);
+
     return true;
   }
   return false;

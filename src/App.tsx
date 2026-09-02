@@ -5,7 +5,7 @@ import {
 } from './types';
 import { 
   initializeDatabase, db, getActiveContext, getTeacherForUser, 
-  getTeacherAssignedClassesAndSubjects, logAudit 
+  getTeacherAssignedClassesAndSubjects, logAudit, cleanupDummyData 
 } from './db';
 import { supabase, pullFromSupabase, pushToSupabase, getSyncStatus, SyncStatus } from './supabase';
 import { Login } from './components/Login';
@@ -62,13 +62,18 @@ export default function App() {
         if (!error && data && data.length > 0) {
           const success = await pullFromSupabase();
           if (success) {
+            cleanupDummyData();
             refreshStats();
             const session = db.getSession();
             if (session) setSessionUser(session);
           }
+        } else {
+          cleanupDummyData();
+          refreshStats();
         }
       } catch (err) {
         console.warn('[Supabase Auto-Sync] Background pull skipped or failed.', err);
+        cleanupDummyData();
       }
     };
 

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  db, logAudit, getActiveContext 
+  db, logAudit, getActiveContext, cleanupDummyData 
 } from '../db';
 import { 
   Profile, Teacher, Class, Subject, Student, TeacherAssignment, 
@@ -783,6 +783,18 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     addToast('info', 'Template Dimuat', 'Contoh data terisi ke kotak teks.');
   };
 
+  // Helper to purge trial / dummy students
+  const handlePurgeTrialStudents = () => {
+    const cleaned = cleanupDummyData();
+    if (cleaned) {
+      syncState();
+      onRefreshStats();
+      addToast('success', 'Data Percobaan Dibersihkan', 'Semua data siswa percobaan telah berhasil dihapus secara permanen.');
+    } else {
+      addToast('info', 'Sudah Bersih', 'Tidak ada data siswa percobaan yang tersisa di sistem.');
+    }
+  };
+
   // Filter & Search Logic for different lists
   const filteredTeachers = useMemo(() => {
     return teachers.filter(t => {
@@ -1158,18 +1170,29 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
 
             {/* Quick Action Buttons */}
             {currentTab === 'siswa' && (
-              <button
-                onClick={() => {
-                  setParsedImportRows([]);
-                  setPasteData('');
-                  setImportClassId('');
-                  setIsImportModalOpen(true);
-                }}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all rounded-xl shadow-sm border border-slate-200"
-              >
-                <Upload className="w-4 h-4" />
-                Impor Massal (Excel)
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handlePurgeTrialStudents}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 transition-all rounded-xl border border-rose-200"
+                  title="Hapus semua data siswa dummy/percobaan bawaan sistem"
+                >
+                  <Trash2 className="w-4 h-4 text-rose-600" />
+                  Bersihkan Data Percobaan
+                </button>
+                <button
+                  onClick={() => {
+                    setParsedImportRows([]);
+                    setPasteData('');
+                    setImportClassId('');
+                    setIsImportModalOpen(true);
+                  }}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all rounded-xl shadow-sm border border-slate-200"
+                >
+                  <Upload className="w-4 h-4" />
+                  Impor Massal (Excel)
+                </button>
+              </>
             )}
 
             <button
