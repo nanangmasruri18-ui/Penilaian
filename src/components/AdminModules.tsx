@@ -2189,15 +2189,15 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
                       </td>
                     </tr>
                   ) : (
-                    rekapLedger.rows.map((row) => (
-                      <tr key={row.studentId} className="hover:bg-slate-50/20 transition-colors">
+                    rekapLedger.rows.map((row, rIdx) => (
+                      <tr key={row.studentId || `row-${rIdx}`} className="hover:bg-slate-50/20 transition-colors">
                         <td className="px-4 py-3.5 text-xs text-center font-mono text-slate-400">{row.no}</td>
                         <td className="px-4 py-3.5 text-xs font-mono text-slate-500">{row.nisn}</td>
                         <td className="px-4 py-3.5 text-xs font-bold text-slate-850">{row.nama}</td>
                         
                         {/* Formatives */}
-                        {row.tpsScores.map(score => (
-                          <td key={score.tpId} className="px-2 py-3.5 text-xs font-mono font-semibold text-center text-slate-600">
+                        {row.tpsScores.map((score, sIdx) => (
+                          <td key={score.tpId || `tp-${sIdx}`} className="px-2 py-3.5 text-xs font-mono font-semibold text-center text-slate-600">
                             {score.nilai !== null ? score.nilai : '-'}
                           </td>
                         ))}
@@ -2207,8 +2207,8 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
                         </td>
 
                         {/* Summative Scopes */}
-                        {row.scopeScores.map(score => (
-                          <td key={score.scopeId} className="px-2 py-3.5 text-xs font-mono font-semibold text-center text-slate-600">
+                        {row.scopeScores.map((score, scIdx) => (
+                          <td key={score.scopeId || `sc-${scIdx}`} className="px-2 py-3.5 text-xs font-mono font-semibold text-center text-slate-600">
                             {score.nilai !== null ? score.nilai : '-'}
                           </td>
                         ))}

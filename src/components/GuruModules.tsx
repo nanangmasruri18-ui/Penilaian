@@ -1043,7 +1043,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                     ) : (
                       filteredStudents.map((student, idx) => {
                         return (
-                          <tr key={student.id} className="hover:bg-slate-50/20 transition-colors">
+                          <tr key={student.id || `std-f-${idx}`} className="hover:bg-slate-50/20 transition-colors">
                             <td className="px-6 py-4 text-sm font-mono text-slate-400">{idx + 1}</td>
                             <td className="px-6 py-4 text-sm font-mono text-slate-500">{student.nisn}</td>
                             <td className="px-6 py-4 text-sm font-bold text-slate-800">{student.nama}</td>
@@ -1170,7 +1170,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                     ) : (
                       filteredStudents.map((student, idx) => {
                         return (
-                          <tr key={student.id} className="hover:bg-slate-50/20 transition-colors">
+                          <tr key={student.id || `std-s-${idx}`} className="hover:bg-slate-50/20 transition-colors">
                             <td className="px-6 py-4 text-sm font-mono text-slate-400">{idx + 1}</td>
                             <td className="px-6 py-4 text-sm font-mono text-slate-500">{student.nisn}</td>
                             <td className="px-6 py-4 text-sm font-bold text-slate-800">{student.nama}</td>
@@ -1290,7 +1290,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                   ) : (
                     filteredStudents.map((student, idx) => {
                       return (
-                        <tr key={student.id} className="hover:bg-slate-50/20 transition-colors">
+                        <tr key={student.id || `std-sas-${idx}`} className="hover:bg-slate-50/20 transition-colors">
                           <td className="px-6 py-4 text-sm font-mono text-slate-400">{idx + 1}</td>
                           <td className="px-6 py-4 text-sm font-mono text-slate-500">{student.nisn}</td>
                           <td className="px-6 py-4 text-sm font-bold text-slate-800">{student.nama}</td>
@@ -1419,15 +1419,15 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                     </td>
                   </tr>
                 ) : (
-                  rekapLedger.rows.map((row) => (
-                    <tr key={row.studentId} className="hover:bg-slate-50/20 transition-colors">
+                  rekapLedger.rows.map((row, rIdx) => (
+                    <tr key={row.studentId || `rekap-${rIdx}`} className="hover:bg-slate-50/20 transition-colors">
                       <td className="px-4 py-3.5 text-xs text-center font-mono text-slate-400">{row.no}</td>
                       <td className="px-4 py-3.5 text-xs font-mono text-slate-500">{row.nisn}</td>
                       <td className="px-4 py-3.5 text-xs font-bold text-slate-800">{row.nama}</td>
                       
                       {/* Formatives */}
-                      {row.tpsScores.map(score => (
-                        <td key={score.tpId} className="px-2 py-3.5 text-xs font-mono font-semibold text-center text-slate-600">
+                      {row.tpsScores.map((score, sIdx) => (
+                        <td key={score.tpId || `tp-${sIdx}`} className="px-2 py-3.5 text-xs font-mono font-semibold text-center text-slate-600">
                           {score.nilai !== null ? score.nilai : '-'}
                         </td>
                       ))}
@@ -1437,8 +1437,8 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                       </td>
 
                       {/* Summative Scopes */}
-                      {row.scopeScores.map(score => (
-                        <td key={score.scopeId} className="px-2 py-3.5 text-xs font-mono font-semibold text-center text-slate-600">
+                      {row.scopeScores.map((score, scIdx) => (
+                        <td key={score.scopeId || `sc-${scIdx}`} className="px-2 py-3.5 text-xs font-mono font-semibold text-center text-slate-600">
                           {score.nilai !== null ? score.nilai : '-'}
                         </td>
                       ))}
@@ -1484,7 +1484,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                   type="text"
                   value={kepsekName}
                   onChange={(e) => handleKepsekNameChange(e.target.value)}
-                  className="font-bold text-slate-800 dark:text-slate-200 print:text-black border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-hidden pb-0.5 min-w-[200px] print:border-none bg-transparent"
+                  className="font-bold text-slate-800 dark:text-slate-200 print:text-black border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-none pb-0.5 min-w-[200px] print:border-none bg-transparent"
                   placeholder="Nama Kepala Sekolah"
                 />
                 <div className="flex items-center gap-1 mt-1 print:mt-0.5">
@@ -1493,7 +1493,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                     type="text"
                     value={kepsekNip}
                     onChange={(e) => handleKepsekNipChange(e.target.value)}
-                    className="text-[10px] text-slate-600 dark:text-slate-400 print:text-black font-mono border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-hidden min-w-[160px] print:border-none bg-transparent"
+                    className="text-[10px] text-slate-600 dark:text-slate-400 print:text-black font-mono border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-none min-w-[160px] print:border-none bg-transparent"
                     placeholder="NIP Kepala Sekolah"
                   />
                 </div>
@@ -1506,7 +1506,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                 type="text"
                 value={signaturePlaceAndDate}
                 onChange={(e) => handleSignatureDateChange(e.target.value)}
-                className="text-slate-500 dark:text-slate-400 print:text-black border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-hidden pb-0.5 text-right font-sans text-xs min-w-[200px] print:border-none bg-transparent"
+                className="text-slate-500 dark:text-slate-400 print:text-black border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-none pb-0.5 text-right font-sans text-xs min-w-[200px] print:border-none bg-transparent"
                 placeholder="Tempat, Tanggal"
               />
               <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black text-sm mt-0.5">Guru Kelas/Mapel</p>
@@ -1524,7 +1524,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                   type="text"
                   value={customTeacherName}
                   onChange={(e) => handleCustomTeacherNameChange(e.target.value)}
-                  className="font-bold text-indigo-600 dark:text-indigo-400 print:text-black border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-hidden pb-0.5 text-right min-w-[200px] print:border-none bg-transparent"
+                  className="font-bold text-indigo-600 dark:text-indigo-400 print:text-black border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-none pb-0.5 text-right min-w-[200px] print:border-none bg-transparent"
                   placeholder="Nama Guru"
                 />
                 <div className="flex items-center justify-end gap-1 mt-1 print:mt-0.5">
@@ -1533,7 +1533,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                     type="text"
                     value={teacherNip}
                     onChange={(e) => handleTeacherNipChange(e.target.value)}
-                    className="text-[10px] text-slate-600 dark:text-slate-400 print:text-black font-mono border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-hidden min-w-[160px] print:border-none bg-transparent text-right"
+                    className="text-[10px] text-slate-600 dark:text-slate-400 print:text-black font-mono border-b border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 focus:border-indigo-500 outline-none min-w-[160px] print:border-none bg-transparent text-right"
                     placeholder="NIP Guru"
                   />
                 </div>

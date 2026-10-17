@@ -72,8 +72,7 @@ export default function App() {
         refreshStats();
         const session = db.getSession();
         if (session) setSessionUser(session);
-      } catch (err) {
-        console.warn('[Supabase Auto-Sync] Startup pull completed with fallback.', err);
+      } catch {
         cleanupDummyData();
         refreshStats();
       }
@@ -81,9 +80,11 @@ export default function App() {
 
     autoPullOnStart();
 
-    // 3. Listen to tab/browser visibility changes: when user opens browser on phone/laptop, re-sync instantly
+    // 3. Listen to tab/browser visibility changes with 30s throttle
+    let lastVisibilityPull = Date.now();
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && Date.now() - lastVisibilityPull > 30000) {
+        lastVisibilityPull = Date.now();
         pullFromSupabase({ silent: true, autoPushIfEmpty: false }).then(() => {
           refreshStats();
           const s = db.getSession();
@@ -93,12 +94,16 @@ export default function App() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // 4. Background heartbeat sync every 20 seconds
+    // 4. Gentle fallback polling (only runs every 90s if tab is visible)
     const syncInterval = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        pullFromSupabase({ silent: true, autoPushIfEmpty: false });
+        const curStatus = getSyncStatus();
+        // If realtime websocket is disconnected, poll to maintain sync
+        if (!curStatus.isRealtimeConnected) {
+          pullFromSupabase({ silent: true, autoPushIfEmpty: false });
+        }
       }
-    }, 20000);
+    }, 90000);
 
     // Event listener for manual sync reload trigger and status change
     const handleDbSynced = () => {

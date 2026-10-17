@@ -173,9 +173,7 @@ try {
     setTimeout(() => {
       try {
         queueAutoPush(KEYS.AUDIT_LOGS, []);
-      } catch (err) {
-        console.warn('Failed to sync empty audit logs:', err);
-      }
+      } catch {}
     }, 1000);
   }
 } catch (e) {}

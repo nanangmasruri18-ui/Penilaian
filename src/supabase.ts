@@ -147,6 +147,9 @@ function mergeArrays(storeKey: string, local: any[], remote: any[]): any[] {
   return Array.from(mergedMap.values());
 }
 
+// Track tables that failed upsert to prevent repetitive warning spam
+const tableWarningSilenced = new Set<string>();
+
 /**
  * Push data into a dedicated separate relational table in Supabase.
  */
@@ -188,15 +191,16 @@ async function pushToDedicatedTable(tableName: string, localItems: any[]): Promi
           .upsert(batch, { onConflict: 'id' });
 
         if (upsertError) {
-          console.warn(`[pushToDedicatedTable] Error upserting to ${tableName}:`, upsertError);
+          if (!tableWarningSilenced.has(tableName)) {
+            tableWarningSilenced.add(tableName);
+          }
           return false;
         }
       }
     }
 
     return true;
-  } catch (err) {
-    console.warn(`[pushToDedicatedTable] Exception for ${tableName}:`, err);
+  } catch {
     return false;
   }
 }
@@ -250,13 +254,11 @@ export async function pushToSupabase(): Promise<boolean> {
       errorMessage: null
     });
     
-    window.dispatchEvent(new Event('merdeka_db_synced'));
     return true;
   } catch (err: any) {
-    console.error('Supabase Push Error:', err);
     setSyncStatus({
       status: 'error',
-      errorMessage: err.message || 'Gagal menyinkronkan data ke Supabase.'
+      errorMessage: err?.message || 'Gagal menyinkronkan data ke Supabase.'
     });
     return false;
   }
@@ -270,7 +272,7 @@ interface PullOptions {
 /**
  * Pull tables from Supabase and synchronize with localStorage.
  * Runs in parallel across all separated tables.
- * If remote tables are empty and autoPushIfEmpty is true, auto-pushes local data!
+ * OPTIMIZED: Only updates localStorage and dispatches render events IF data actually changed!
  */
 export async function pullFromSupabase(options: PullOptions = {}): Promise<boolean> {
   const { silent = false, autoPushIfEmpty = true } = options;
@@ -282,6 +284,7 @@ export async function pullFromSupabase(options: PullOptions = {}): Promise<boole
   try {
     let pulledCount = 0;
     let tablesWithData = 0;
+    let anyTableChanged = false;
 
     // Fetch all tables in parallel
     const results = await Promise.allSettled(
@@ -310,7 +313,12 @@ export async function pullFromSupabase(options: PullOptions = {}): Promise<boole
             } catch {}
           }
 
-          localStorage.setItem(key, JSON.stringify(finalVal));
+          // Compare stringified versions to detect ACTUAL changes
+          const newRaw = JSON.stringify(finalVal);
+          if (localRaw !== newRaw) {
+            localStorage.setItem(key, newRaw);
+            anyTableChanged = true;
+          }
         }
       }
     }
@@ -327,12 +335,10 @@ export async function pullFromSupabase(options: PullOptions = {}): Promise<boole
       }
 
       if (localHasData && autoPushIfEmpty) {
-        console.log('[Supabase Auto-Init] Remote tables are empty. Auto-pushing initial local data to Supabase...');
         await pushToSupabase();
         return true;
       }
 
-      // If both remote and local are clean, succeed quietly
       setSyncStatus({
         status: 'idle',
         lastSync: new Date().toISOString(),
@@ -347,21 +353,23 @@ export async function pullFromSupabase(options: PullOptions = {}): Promise<boole
       errorMessage: null
     });
 
-    window.dispatchEvent(new Event('merdeka_db_synced'));
+    // ONLY dispatch render event if local database was actually modified by new data!
+    if (anyTableChanged) {
+      window.dispatchEvent(new Event('merdeka_db_synced'));
+    }
     return true;
   } catch (err: any) {
-    console.warn('Supabase Pull Notice:', err?.message || err);
     if (!silent) {
       setSyncStatus({
         status: 'error',
-        errorMessage: err.message || 'Gagal mengunduh data dari Supabase.'
+        errorMessage: err?.message || 'Gagal mengunduh data dari Supabase.'
       });
     }
     return false;
   }
 }
 
-// Debounced auto-push for fast UI response
+// Debounced auto-push for fast UI response without freezing keystrokes
 const debounceTimers: Record<string, any> = {};
 
 export async function queueAutoPush(key: string, data: any): Promise<void> {
@@ -380,10 +388,10 @@ export async function queueAutoPush(key: string, data: any): Promise<void> {
           lastSync: new Date().toISOString()
         });
       }
-    } catch (err) {
-      console.warn(`[Supabase Auto-Push] Failed to auto-save key "${key}":`, err);
+    } catch {
+      // Quiet fallback
     }
-  }, 250);
+  }, 300);
 }
 
 // Real-time synchronization channel
@@ -434,9 +442,13 @@ export function initSupabaseRealtime(onSync?: () => void) {
             }
           }
 
-          localStorage.setItem(table, JSON.stringify(currentList));
-          window.dispatchEvent(new Event('merdeka_db_synced'));
-          if (onSync) onSync();
+          const newRaw = JSON.stringify(currentList);
+          // Only trigger state reload if the data actually differs from current local storage!
+          if (currentRaw !== newRaw) {
+            localStorage.setItem(table, newRaw);
+            window.dispatchEvent(new Event('merdeka_db_synced'));
+            if (onSync) onSync();
+          }
         }
       )
       .subscribe((status) => {
@@ -446,8 +458,8 @@ export function initSupabaseRealtime(onSync?: () => void) {
           setSyncStatus({ isRealtimeConnected: false });
         }
       });
-  } catch (err) {
-    console.warn('[Realtime Setup Error]:', err);
+  } catch {
+    // Non-fatal
   }
 
   return realtimeChannel;
