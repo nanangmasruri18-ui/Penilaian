@@ -5,7 +5,7 @@ import { ToastType } from './Toast';
 import { 
   Database, RefreshCw, CheckCircle2, AlertCircle, Copy, Check, 
   ExternalLink, Lock, Server, HelpCircle, Cloud, ArrowUpRight, ArrowDownLeft,
-  Table, Download, Code2, Layers, CheckSquare, Sparkles, FileText
+  Table, Download, Code2, Layers, CheckSquare, Sparkles, FileText, Radio, Zap
 } from 'lucide-react';
 
 interface SupabaseSyncProps {
@@ -26,7 +26,7 @@ const SEPARATED_TABLES: TableMeta[] = [
     name: 'merdeka_teachers',
     label: 'Data Guru',
     category: 'Master Data',
-    description: 'Menyimpan identitas guru pengajar dan kaitannya dengan akun login.',
+    description: 'Menyimpan identitas guru pengajar dan hubungannya ke akun login.',
     columns: ['id (PK, text)', 'user_id (text)', 'nama (text)', 'created_at', 'updated_at']
   },
   {
@@ -40,7 +40,7 @@ const SEPARATED_TABLES: TableMeta[] = [
     name: 'merdeka_students',
     label: 'Data Siswa',
     category: 'Master Data',
-    description: 'Menyimpan data siswa lengkap dengan NISN dan referensi ID kelas.',
+    description: 'Menyimpan data siswa lengkap dengan NISN dan ID rombel/kelas.',
     columns: ['id (PK, text)', 'nisn (text)', 'nama (text)', 'kelas_id (text)', 'created_at', 'updated_at']
   },
   {
@@ -54,14 +54,14 @@ const SEPARATED_TABLES: TableMeta[] = [
     name: 'merdeka_assignments',
     label: 'Penugasan Guru',
     category: 'Master Data',
-    description: 'Relasi penugasan guru mengajar mapel tertentu di kelas tertentu.',
+    description: 'Relasi penugasan guru mengajar mata pelajaran tertentu pada kelas tertentu.',
     columns: ['id (PK, text)', 'teacher_id (text)', 'class_id (text)', 'subject_id (text)', 'created_at', 'updated_at']
   },
   {
     name: 'merdeka_profiles',
     label: 'Profil Pengguna',
     category: 'Sistem',
-    description: 'Akun otentikasi login Admin dan Guru.',
+    description: 'Akun otentikasi login Administrator dan Guru.',
     columns: ['id (PK, text)', 'nama (text)', 'role (Admin|Guru)', 'email (text)', 'password (text)', 'updated_at']
   },
   {
@@ -82,50 +82,43 @@ const SEPARATED_TABLES: TableMeta[] = [
     name: 'merdeka_learning_objectives',
     label: 'Tujuan Pembelajaran (TP)',
     category: 'Penilaian',
-    description: 'Target pencapaian pembelajaran per mapel dan rombel.',
+    description: 'Target pencapaian pembelajaran per mata pelajaran dan rombel.',
     columns: ['id (PK, text)', 'subject_id (text)', 'class_id (text)', 'kode (text)', 'deskripsi (text)', 'updated_at']
   },
   {
     name: 'merdeka_material_scopes',
     label: 'Lingkup Materi (LM)',
     category: 'Penilaian',
-    description: 'Cakupan bab/tema materi pelajaran yang diujikan secara sumatif.',
+    description: 'Cakupan bab/tema materi pelajaran untuk penilaian sumatif lingkup materi.',
     columns: ['id (PK, text)', 'subject_id (text)', 'class_id (text)', 'nama (text)', 'updated_at']
   },
   {
     name: 'merdeka_formative_scores',
     label: 'Nilai Formatif',
     category: 'Penilaian',
-    description: 'Rekam skor penilaian formatif siswa per Tujuan Pembelajaran (TP).',
+    description: 'Skor penilaian formatif siswa per Tujuan Pembelajaran (TP).',
     columns: ['id (PK, text)', 'student_id (text)', 'tp_id (text)', 'nilai (numeric)', 'semester', 'tahun', 'updated_at']
   },
   {
     name: 'merdeka_summative_scope_scores',
     label: 'Nilai Sumatif Lingkup Materi',
     category: 'Penilaian',
-    description: 'Rekam skor sumatif per lingkup materi (LM).',
+    description: 'Skor penilaian sumatif per lingkup materi (LM).',
     columns: ['id (PK, text)', 'student_id (text)', 'lingkup_id (text)', 'nilai (numeric)', 'semester', 'tahun', 'updated_at']
   },
   {
     name: 'merdeka_semester_scores',
     label: 'Nilai Sumatif Akhir Semester (SAS)',
     category: 'Penilaian',
-    description: 'Rekam skor evaluasi akhir semester per siswa dan mata pelajaran.',
+    description: 'Skor evaluasi akhir semester per siswa dan mata pelajaran.',
     columns: ['id (PK, text)', 'student_id (text)', 'subject_id (text)', 'nilai (numeric)', 'semester', 'tahun', 'updated_at']
   },
   {
     name: 'merdeka_audit_logs',
     label: 'Audit Log Aktivitas',
     category: 'Sistem',
-    description: 'Jejak rekaman aktivitas perubahan data untuk akuntabilitas sistem.',
+    description: 'Jejak rekaman riwayat perubahan data pada sistem.',
     columns: ['id (PK, text)', 'user (text)', 'action (text)', 'timestamp (text)']
-  },
-  {
-    name: 'merdeka_store',
-    label: 'Cadangan Snapshot Key-Value',
-    category: 'Sistem',
-    description: 'Penyimpanan cadangan / failover otomatis untuk menjaga kontinuitas data.',
-    columns: ['key (PK, text)', 'value (jsonb)', 'updated_at (timestamptz)']
   }
 ];
 
@@ -145,8 +138,11 @@ export function SupabaseSync({ addToast, onRefreshStats }: SupabaseSyncProps) {
 
   const sqlSetupCommand = `-- ====================================================================
 -- SKRIP SQL LENGKAP: DATABASE KURIKULUM MERDEKA (SUPABASE POSTGRESQL)
--- Tabel Terpisah: Guru, Kelas, Siswa, Mapel, Nilai & Sistem
+-- Versi Tabel Terpisah (Relasional) & Sinkronisasi Realtime
 -- ====================================================================
+
+-- 0. HAPUS TABEL LAMA (merdeka_store) SESUAI INSTRUKSI MIGRASI
+drop table if exists public.merdeka_store cascade;
 
 -- 1. TABEL TAHUN AJARAN
 create table if not exists public.merdeka_academic_years (
@@ -297,13 +293,6 @@ create table if not exists public.merdeka_audit_logs (
   created_at timestamp with time zone default now()
 );
 
--- 15. TABEL CADANGAN KEY-VALUE STORE
-create table if not exists public.merdeka_store (
-  key text primary key,
-  value jsonb,
-  updated_at timestamp with time zone default now()
-);
-
 -- ====================================================================
 -- AKTIFKAN ROW LEVEL SECURITY (RLS)
 -- ====================================================================
@@ -321,7 +310,6 @@ alter table public.merdeka_formative_scores enable row level security;
 alter table public.merdeka_summative_scope_scores enable row level security;
 alter table public.merdeka_semester_scores enable row level security;
 alter table public.merdeka_audit_logs enable row level security;
-alter table public.merdeka_store enable row level security;
 
 -- ====================================================================
 -- KEBIJAKAN AKSES PUBLIK (SELECT, INSERT, UPDATE, DELETE via anon key)
@@ -368,8 +356,29 @@ create policy "Allow public access for semester_scores" on public.merdeka_semest
 drop policy if exists "Allow public access for audit_logs" on public.merdeka_audit_logs;
 create policy "Allow public access for audit_logs" on public.merdeka_audit_logs for all to public using (true) with check (true);
 
-drop policy if exists "Allow public access for store" on public.merdeka_store;
-create policy "Allow public access for store" on public.merdeka_store for all to public using (true) with check (true);`;
+-- ====================================================================
+-- AKTIFKAN REPLIKASI REALTIME SUPABASE UNTUK SETIAP TABEL
+-- ====================================================================
+do $$
+begin
+  alter publication supabase_realtime add table 
+    public.merdeka_academic_years,
+    public.merdeka_semesters,
+    public.merdeka_profiles,
+    public.merdeka_teachers,
+    public.merdeka_classes,
+    public.merdeka_subjects,
+    public.merdeka_students,
+    public.merdeka_assignments,
+    public.merdeka_learning_objectives,
+    public.merdeka_material_scopes,
+    public.merdeka_formative_scores,
+    public.merdeka_summative_scope_scores,
+    public.merdeka_semester_scores,
+    public.merdeka_audit_logs;
+exception when others then
+  null;
+end $$;`;
 
   useEffect(() => {
     const handleSyncChange = () => {
@@ -385,7 +394,7 @@ create policy "Allow public access for store" on public.merdeka_store for all to
   const handleCopySql = () => {
     navigator.clipboard.writeText(sqlSetupCommand);
     setIsCopied(true);
-    addToast('success', 'SQL Disalin', 'Query pembuatan tabel terpisah telah disalin ke clipboard.');
+    addToast('success', 'SQL Disalin', 'Query pembuatan tabel terpisah & realtime telah disalin ke clipboard.');
     setTimeout(() => setIsCopied(false), 2000);
   };
 
@@ -409,9 +418,11 @@ create policy "Allow public access for store" on public.merdeka_store for all to
 
     try {
       const detected: string[] = [];
-
-      // Check key tables
-      const checkList = ['merdeka_teachers', 'merdeka_classes', 'merdeka_students', 'merdeka_subjects', 'merdeka_assignments', 'merdeka_store'];
+      const checkList = [
+        'merdeka_teachers', 'merdeka_classes', 'merdeka_students', 
+        'merdeka_subjects', 'merdeka_assignments', 'merdeka_profiles',
+        'merdeka_formative_scores', 'merdeka_summative_scope_scores', 'merdeka_semester_scores'
+      ];
       
       for (const t of checkList) {
         try {
@@ -419,34 +430,30 @@ create policy "Allow public access for store" on public.merdeka_store for all to
           if (!error) {
             detected.push(t);
           }
-        } catch (e) {}
+        } catch {}
       }
 
       setDetectedTables(detected);
 
-      if (detected.length >= 5) {
+      if (detected.length >= 4) {
         setTestStatus('success');
-        setTestMessage(`Koneksi aktif! Terdeteksi ${detected.length} tabel relasional terpisah siap digunakan di database Supabase Anda.`);
+        setTestMessage(`Koneksi aktif! Terdeteksi ${detected.length} dari ${checkList.length} tabel relasional terpisah siap digunakan dengan sinkronisasi realtime.`);
         addToast('success', 'Koneksi Berhasil', 'Tabel terpisah di Supabase terverifikasi sempurna!');
-      } else if (detected.includes('merdeka_store')) {
-        setTestStatus('success');
-        setTestMessage('Koneksi aktif! Tabel fallback "merdeka_store" terdeteksi. Untuk memisahkan tabel secara penuh (Guru, Kelas, Siswa, dll), jalankan skrip SQL di bawah di SQL Editor Supabase Anda.');
-        addToast('info', 'Tabel Store Aktif', 'Jalankan skrip SQL baru untuk memisahkan tabel secara relasional.');
       } else {
         setTestStatus('error');
-        setTestMessage('Terhubung ke server Supabase, namun tabel belum dibuat. Silakan salin & jalankan kode SQL di bawah ini di SQL Editor Supabase Anda.');
+        setTestMessage('Terhubung ke server Supabase, namun tabel terpisah belum terdeteksi. Silakan salin & jalankan kode SQL di bawah ini di SQL Editor Supabase Anda.');
         addToast('error', 'Tabel Belum Dibuat', 'Silakan jalankan SQL di Supabase SQL Editor.');
       }
     } catch (err: any) {
       console.error(err);
       setTestStatus('error');
-      setTestMessage(`Gagal terhubung: ${err.message || 'Periksa koneksi internet atau kredensial Anda.'}`);
+      setTestMessage(`Gagal terhubung: ${err.message || 'Periksa koneksi internet Anda.'}`);
       addToast('error', 'Koneksi Gagal', 'Gagal memverifikasi database Supabase.');
     }
   };
 
   const handlePush = async () => {
-    const confirm = window.confirm('Apakah Anda yakin ingin MENGIRIM seluruh data lokal ke tabel Supabase (Guru, Siswa, Kelas, Nilai, dll)?');
+    const confirm = window.confirm('Apakah Anda ingin MENGIRIM seluruh data lokal ke tabel terpisah Supabase? Seluruh guru, siswa, kelas, dan nilai akan disinkronkan ke cloud.');
     if (!confirm) return;
 
     const session = db.getSession();
@@ -467,7 +474,7 @@ create policy "Allow public access for store" on public.merdeka_store for all to
   };
 
   const handlePull = async () => {
-    const confirm = window.confirm('Apakah Anda yakin ingin MENARIK data dari Supabase? Data di aplikasi Anda saat ini akan diselaraskan dengan data dari cloud.');
+    const confirm = window.confirm('Apakah Anda ingin MENARIK data terbaru dari tabel Supabase? Data di browser ini akan diperbarui dari cloud.');
     if (!confirm) return;
 
     const session = db.getSession();
@@ -475,14 +482,14 @@ create policy "Allow public access for store" on public.merdeka_store for all to
 
     logAudit(user, 'Memulai penarikan (pull) data dari Supabase.');
 
-    const success = await pullFromSupabase();
+    const success = await pullFromSupabase({ silent: false, autoPushIfEmpty: false });
     if (success) {
-      addToast('success', 'Data Diunduh', 'Berhasil memperbarui database lokal dengan data dari tabel Supabase!');
+      addToast('success', 'Data Diunduh', 'Berhasil menyelaraskan database lokal dengan data dari tabel Supabase!');
       logAudit(user, 'Sukses mengunduh dan menerapkan data dari tabel Supabase.');
       if (onRefreshStats) onRefreshStats();
       setTimeout(() => {
         window.location.reload();
-      }, 1000);
+      }, 800);
     } else {
       const currentStatus = getSyncStatus();
       addToast('error', 'Gagal Mengunduh', currentStatus.errorMessage || 'Gagal menarik data.');
@@ -509,26 +516,33 @@ create policy "Allow public access for store" on public.merdeka_store for all to
                 <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">Supabase Relasional (Tabel Terpisah)</h3>
               </div>
               <p className="text-xs text-slate-500">
-                Penyimpanan cloud terpisah: Data Guru, Kelas, Siswa, Penugasan, dan Nilai memiliki tabel masing-masing.
+                Data Guru, Kelas, Siswa, Mapel, dan Nilai terpisah secara rapi dengan sinkronisasi Real-Time multi-perangkat.
               </p>
             </div>
             
-            <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold font-mono uppercase tracking-wider
-              ${syncStatus.status === 'success' ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400' : 
-                syncStatus.status === 'syncing' ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400' : 
-                syncStatus.status === 'error' ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400' : 
-                'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}
-            `}>
-              <span className={`w-2 h-2 rounded-full 
-                ${syncStatus.status === 'success' ? 'bg-emerald-500' : 
-                  syncStatus.status === 'syncing' ? 'bg-indigo-500 animate-pulse' : 
-                  syncStatus.status === 'error' ? 'bg-rose-500' : 
-                  'bg-slate-400'}
-              `} />
-              {syncStatus.status === 'success' ? 'Sinkron' : 
-               syncStatus.status === 'syncing' ? 'Menyinkronkan' : 
-               syncStatus.status === 'error' ? 'Koneksi Bermasalah' : 'Belum Sinkron'}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold font-mono uppercase tracking-wider
+                ${syncStatus.status === 'success' ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400' : 
+                  syncStatus.status === 'syncing' ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400' : 
+                  syncStatus.status === 'error' ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400' : 
+                  'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}
+              `}>
+                <span className={`w-2 h-2 rounded-full 
+                  ${syncStatus.status === 'success' ? 'bg-emerald-500' : 
+                    syncStatus.status === 'syncing' ? 'bg-indigo-500 animate-pulse' : 
+                    syncStatus.status === 'error' ? 'bg-rose-500' : 
+                    'bg-slate-400'}
+                `} />
+                {syncStatus.status === 'success' ? 'Sinkron' : 
+                 syncStatus.status === 'syncing' ? 'Menyinkronkan' : 
+                 syncStatus.status === 'error' ? 'Koneksi Bermasalah' : 'Siap'}
+              </span>
+
+              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold font-mono bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-100/50 dark:border-indigo-900/50">
+                <Radio className="w-3 h-3 text-emerald-500 animate-pulse" />
+                Live Sync
+              </span>
+            </div>
           </div>
 
           {/* Masked credentials list */}
@@ -543,7 +557,7 @@ create policy "Allow public access for store" on public.merdeka_store for all to
             </div>
             {syncStatus.lastSync && (
               <div className="flex items-center justify-between text-slate-600 dark:text-slate-400 pt-1">
-                <span>Sinkronisasi Terakhir:</span>
+                <span className="flex items-center gap-1"><Zap className="w-3.5 h-3.5 text-amber-500" /> Sinkronisasi Terakhir:</span>
                 <span className="font-bold text-indigo-600 dark:text-indigo-400">{new Date(syncStatus.lastSync).toLocaleString('id-ID')}</span>
               </div>
             )}
@@ -556,7 +570,7 @@ create policy "Allow public access for store" on public.merdeka_store for all to
               className="px-4 py-2 text-xs font-semibold border border-slate-200 dark:border-slate-700 hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-xl text-slate-600 dark:text-slate-300 bg-transparent transition-all cursor-pointer flex items-center gap-1.5"
             >
               <Cloud className="w-3.5 h-3.5" />
-              {testStatus === 'testing' ? 'Menguji Tabel...' : 'Uji Koneksi & Struktur Tabel'}
+              {testStatus === 'testing' ? 'Menguji Tabel...' : 'Uji Koneksi & Tabel'}
             </button>
             <button
               onClick={handlePush}
@@ -581,19 +595,19 @@ create policy "Allow public access for store" on public.merdeka_store for all to
         <div className="bg-indigo-50/40 dark:bg-indigo-950/10 p-6 rounded-2xl border border-indigo-100/50 dark:border-indigo-900/30 flex flex-col justify-between">
           <div className="space-y-3">
             <h3 className="text-xs font-bold text-indigo-950 dark:text-indigo-300 uppercase tracking-widest flex items-center gap-1">
-              <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" /> Desain Relasional Terpisah
+              <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" /> Sinkronisasi Real-Time Multi-Device
             </h3>
             <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-              Kini setiap entitas memiliki tabel mandiri: <strong>Guru</strong>, <strong>Kelas</strong>, <strong>Siswa</strong>, <strong>Penugasan</strong>, dan <strong>Nilai</strong>.
+              Saat guru menginput nilai dari HP atau laptop lain, data <strong>langsung terupdate secara realtime</strong> di layar Admin dan guru lainnya tanpa perlu refresh manual.
             </p>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-              Anda dapat mengelola, melihat, mengekspor, atau menghubungkannya ke sistem pelaporan eksternal secara langsung melalui dashboard Supabase.
+              Tabel lama (<code>merdeka_store</code>) telah dihapus dan digantikan oleh 14 tabel relasional mandiri.
             </p>
           </div>
 
           <div className="p-3 bg-white dark:bg-slate-900/80 rounded-xl border border-indigo-100/30 text-[10px] text-slate-500">
-            <span className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Cara Migrasi:</span>
-            Jalankan skrip SQL di bawah pada <strong>SQL Editor Supabase</strong>, lalu klik <strong>"Kirim ke Supabase (Push)"</strong> untuk menyalin data Anda!
+            <span className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Status Realtime:</span>
+            Koneksi WebSocket aktif memantau perubahan data tabel di cloud secara konstan.
           </div>
         </div>
       </div>
@@ -618,10 +632,10 @@ create policy "Allow public access for store" on public.merdeka_store for all to
           <div>
             <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
               <Table className="w-4 h-4 text-indigo-600" />
-              Daftar Tabel Terpisah di Supabase ({SEPARATED_TABLES.length} Tabel)
+              Daftar Tabel Terpisah di Supabase ({SEPARATED_TABLES.length} Tabel Relasional)
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Struktur tabel relasional untuk kemudahan query SQL, integrasi data, dan pelaporan independen.
+              Setiap tabel dapat di-query, di-filter, dan diintegrasikan secara independen.
             </p>
           </div>
 
@@ -685,10 +699,10 @@ create policy "Allow public access for store" on public.merdeka_store for all to
           <div>
             <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
               <Code2 className="w-4 h-4 text-indigo-600" />
-              Skrip SQL Lengkap (PostgreSQL Supabase)
+              Skrip SQL Lengkap (Hapus Tabel Lama & Buat 14 Tabel Baru)
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Jalankan sekali di SQL Editor Supabase untuk membuat 14 tabel terpisah dan konfigurasi hak akses RLS.
+              Jalankan sekali di SQL Editor Supabase untuk menghapus <code>merdeka_store</code>, membuat 14 tabel terpisah, dan mengaktifkan Realtime.
             </p>
           </div>
           
@@ -713,14 +727,14 @@ create policy "Allow public access for store" on public.merdeka_store for all to
 
         <div className="p-5 space-y-4">
           <div className="space-y-2 text-xs text-slate-600 dark:text-slate-400">
-            <p className="font-semibold text-slate-800 dark:text-slate-200">Panduan Langkah Menjalankan SQL di Supabase:</p>
+            <p className="font-semibold text-slate-800 dark:text-slate-200">Langkah Menjalankan di Supabase:</p>
             <ol className="list-decimal list-inside space-y-1.5 pl-1">
               <li>Buka proyek Anda di <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline inline-flex items-center gap-0.5 font-semibold">Supabase Dashboard <ExternalLink className="w-3 h-3" /></a></li>
-              <li>Klik menu <strong>SQL Editor</strong> di bilah navigasi kiri Supabase.</li>
-              <li>Klik tombol <strong>New Query</strong> (atau tanda +).</li>
-              <li>Salin kode SQL di bawah ini dan tempelkan (Paste) ke editor tersebut.</li>
-              <li>Klik tombol hijau <strong>Run</strong> (atau tekan Ctrl+Enter / Cmd+Enter).</li>
-              <li>Setelah muncul notifikasi sukses, kembali ke tab ini dan klik tombol <strong>"Kirim ke Supabase (Push)"</strong> untuk menyalin data lokal ke tabel baru.</li>
+              <li>Klik menu <strong>SQL Editor</strong> di bilah navigasi kiri.</li>
+              <li>Klik tombol <strong>New Query</strong> (+).</li>
+              <li>Salin kode SQL di bawah ini dan tempelkan (Paste).</li>
+              <li>Klik tombol hijau <strong>Run</strong> (atau tekan Ctrl+Enter). Tabel lama <code>merdeka_store</code> akan otomatis terhapus dan 14 tabel baru akan terbuat berikut replikasi realtimenya.</li>
+              <li>Kembali ke halaman ini dan klik tombol <strong>"Kirim ke Supabase (Push)"</strong> untuk menyalin data lokal ke tabel baru.</li>
             </ol>
           </div>
 

@@ -1,23 +1,10 @@
 -- ====================================================================
 -- SKRIP SQL LENGKAP: DATABASE KURIKULUM MERDEKA (SUPABASE POSTGRESQL)
+-- Versi Tabel Terpisah (Relasional) & Sinkronisasi Realtime
 -- ====================================================================
--- Skrip ini membuat seluruh tabel terpisah secara relasional untuk:
--- 1. Data Tahun Ajaran (merdeka_academic_years)
--- 2. Data Semester (merdeka_semesters)
--- 3. Data Profil & Akun Pengguna (merdeka_profiles)
--- 4. Data Guru (merdeka_teachers)
--- 5. Data Kelas (merdeka_classes)
--- 6. Data Mata Pelajaran (merdeka_subjects)
--- 7. Data Siswa (merdeka_students)
--- 8. Data Penugasan Guru ke Kelas & Mapel (merdeka_assignments)
--- 9. Tujuan Pembelajaran / TP (merdeka_learning_objectives)
--- 10. Lingkup Materi / LM (merdeka_material_scopes)
--- 11. Nilai Formatif Siswa (merdeka_formative_scores)
--- 12. Nilai Sumatif Lingkup Materi (merdeka_summative_scope_scores)
--- 13. Nilai Sumatif Akhir Semester / SAS (merdeka_semester_scores)
--- 14. Log Aktivitas Sistem (merdeka_audit_logs)
--- 15. Backup Key-Value Store (merdeka_store)
--- ====================================================================
+
+-- 0. HAPUS TABEL LAMA (merdeka_store) SESUAI INSTRUKSI MIGRASI
+drop table if exists public.merdeka_store cascade;
 
 -- 1. Tabel Tahun Ajaran
 create table if not exists public.merdeka_academic_years (
@@ -168,13 +155,6 @@ create table if not exists public.merdeka_audit_logs (
   created_at timestamp with time zone default now()
 );
 
--- 15. Tabel Cadangan Store (Key-Value fallback & sync snapshot)
-create table if not exists public.merdeka_store (
-  key text primary key,
-  value jsonb,
-  updated_at timestamp with time zone default now()
-);
-
 -- ====================================================================
 -- AKTIFKAN ROW LEVEL SECURITY (RLS)
 -- ====================================================================
@@ -192,68 +172,73 @@ alter table public.merdeka_formative_scores enable row level security;
 alter table public.merdeka_summative_scope_scores enable row level security;
 alter table public.merdeka_semester_scores enable row level security;
 alter table public.merdeka_audit_logs enable row level security;
-alter table public.merdeka_store enable row level security;
 
 -- ====================================================================
 -- KEBIJAKAN AKSES PUBLIK (SELECT, INSERT, UPDATE, DELETE via anon key)
 -- ====================================================================
-
--- 1. Academic Years
 drop policy if exists "Allow public access for academic_years" on public.merdeka_academic_years;
 create policy "Allow public access for academic_years" on public.merdeka_academic_years for all to public using (true) with check (true);
 
--- 2. Semesters
 drop policy if exists "Allow public access for semesters" on public.merdeka_semesters;
 create policy "Allow public access for semesters" on public.merdeka_semesters for all to public using (true) with check (true);
 
--- 3. Profiles
 drop policy if exists "Allow public access for profiles" on public.merdeka_profiles;
 create policy "Allow public access for profiles" on public.merdeka_profiles for all to public using (true) with check (true);
 
--- 4. Teachers
 drop policy if exists "Allow public access for teachers" on public.merdeka_teachers;
 create policy "Allow public access for teachers" on public.merdeka_teachers for all to public using (true) with check (true);
 
--- 5. Classes
 drop policy if exists "Allow public access for classes" on public.merdeka_classes;
 create policy "Allow public access for classes" on public.merdeka_classes for all to public using (true) with check (true);
 
--- 6. Subjects
 drop policy if exists "Allow public access for subjects" on public.merdeka_subjects;
 create policy "Allow public access for subjects" on public.merdeka_subjects for all to public using (true) with check (true);
 
--- 7. Students
 drop policy if exists "Allow public access for students" on public.merdeka_students;
 create policy "Allow public access for students" on public.merdeka_students for all to public using (true) with check (true);
 
--- 8. Assignments
 drop policy if exists "Allow public access for assignments" on public.merdeka_assignments;
 create policy "Allow public access for assignments" on public.merdeka_assignments for all to public using (true) with check (true);
 
--- 9. Learning Objectives
 drop policy if exists "Allow public access for learning_objectives" on public.merdeka_learning_objectives;
 create policy "Allow public access for learning_objectives" on public.merdeka_learning_objectives for all to public using (true) with check (true);
 
--- 10. Material Scopes
 drop policy if exists "Allow public access for material_scopes" on public.merdeka_material_scopes;
 create policy "Allow public access for material_scopes" on public.merdeka_material_scopes for all to public using (true) with check (true);
 
--- 11. Formative Scores
 drop policy if exists "Allow public access for formative_scores" on public.merdeka_formative_scores;
 create policy "Allow public access for formative_scores" on public.merdeka_formative_scores for all to public using (true) with check (true);
 
--- 12. Summative Scope Scores
 drop policy if exists "Allow public access for summative_scope_scores" on public.merdeka_summative_scope_scores;
 create policy "Allow public access for summative_scope_scores" on public.merdeka_summative_scope_scores for all to public using (true) with check (true);
 
--- 13. Semester Scores
 drop policy if exists "Allow public access for semester_scores" on public.merdeka_semester_scores;
 create policy "Allow public access for semester_scores" on public.merdeka_semester_scores for all to public using (true) with check (true);
 
--- 14. Audit Logs
 drop policy if exists "Allow public access for audit_logs" on public.merdeka_audit_logs;
 create policy "Allow public access for audit_logs" on public.merdeka_audit_logs for all to public using (true) with check (true);
 
--- 15. Store
-drop policy if exists "Allow public access for store" on public.merdeka_store;
-create policy "Allow public access for store" on public.merdeka_store for all to public using (true) with check (true);
+-- ====================================================================
+-- AKTIFKAN REPLIKASI REALTIME SUPABASE UNTUK SETIAP TABEL
+-- ====================================================================
+do $$
+begin
+  alter publication supabase_realtime add table 
+    public.merdeka_academic_years,
+    public.merdeka_semesters,
+    public.merdeka_profiles,
+    public.merdeka_teachers,
+    public.merdeka_classes,
+    public.merdeka_subjects,
+    public.merdeka_students,
+    public.merdeka_assignments,
+    public.merdeka_learning_objectives,
+    public.merdeka_material_scopes,
+    public.merdeka_formative_scores,
+    public.merdeka_summative_scope_scores,
+    public.merdeka_semester_scores,
+    public.merdeka_audit_logs;
+exception when others then
+  -- Jika replikasi sudah aktif untuk tabel tertentu, abaikan error
+  null;
+end $$;

@@ -7,7 +7,9 @@ import {
   initializeDatabase, db, getActiveContext, getTeacherForUser, 
   getTeacherAssignedClassesAndSubjects, logAudit, cleanupDummyData 
 } from './db';
-import { supabase, pullFromSupabase, pushToSupabase, getSyncStatus, SyncStatus } from './supabase';
+import { 
+  supabase, pullFromSupabase, pushToSupabase, getSyncStatus, SyncStatus, initSupabaseRealtime 
+} from './supabase';
 import { Login } from './components/Login';
 import { ToastContainer, ToastMessage, ToastType } from './components/Toast';
 import { AdminModules } from './components/AdminModules';
@@ -17,7 +19,7 @@ import {
   GraduationCap, LogOut, Sun, Moon, Menu, X, LayoutDashboard, 
   Users, Layers, BookOpen, Calendar, Clock, History, Settings, 
   Sliders, User, Shield, Info, Database, AlertTriangle, ArrowRight, CheckCircle, Flame,
-  Sparkles, FileText, Trophy, Award
+  Sparkles, FileText, Trophy, Award, Radio
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -55,27 +57,48 @@ export default function App() {
 
     refreshStats();
 
-    // Auto-pull from Supabase on startup to sync the newest cloud state from separate tables or store
+    // 1. Initialize Supabase Realtime WebSocket listener for instant multi-device sync
+    initSupabaseRealtime(() => {
+      refreshStats();
+      const s = db.getSession();
+      if (s) setSessionUser(s);
+    });
+
+    // 2. Auto-pull from Supabase on startup (silent mode to prevent error alarms)
     const autoPullOnStart = async () => {
       try {
-        const success = await pullFromSupabase();
-        if (success) {
-          cleanupDummyData();
-          refreshStats();
-          const session = db.getSession();
-          if (session) setSessionUser(session);
-        } else {
-          cleanupDummyData();
-          refreshStats();
-        }
+        await pullFromSupabase({ silent: true, autoPushIfEmpty: true });
+        cleanupDummyData();
+        refreshStats();
+        const session = db.getSession();
+        if (session) setSessionUser(session);
       } catch (err) {
-        console.warn('[Supabase Auto-Sync] Background pull skipped or failed.', err);
+        console.warn('[Supabase Auto-Sync] Startup pull completed with fallback.', err);
         cleanupDummyData();
         refreshStats();
       }
     };
 
     autoPullOnStart();
+
+    // 3. Listen to tab/browser visibility changes: when user opens browser on phone/laptop, re-sync instantly
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        pullFromSupabase({ silent: true, autoPushIfEmpty: false }).then(() => {
+          refreshStats();
+          const s = db.getSession();
+          if (s) setSessionUser(s);
+        });
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // 4. Background heartbeat sync every 20 seconds
+    const syncInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        pullFromSupabase({ silent: true, autoPushIfEmpty: false });
+      }
+    }, 20000);
 
     // Event listener for manual sync reload trigger and status change
     const handleDbSynced = () => {
@@ -92,6 +115,8 @@ export default function App() {
     window.addEventListener('merdeka_db_synced', handleDbSynced);
     window.addEventListener('supabase_sync_changed', handleSyncStatusChange);
     return () => {
+      clearInterval(syncInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('merdeka_db_synced', handleDbSynced);
       window.removeEventListener('supabase_sync_changed', handleSyncStatusChange);
     };
