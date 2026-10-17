@@ -20,7 +20,7 @@ const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'e
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Define keys to sync (exactly matching the localStorage keys in src/db.ts)
+// Define keys to sync (exactly matching the localStorage keys & Supabase table names)
 export const SYNC_KEYS = [
   'merdeka_academic_years',
   'merdeka_semesters',
@@ -59,30 +59,31 @@ export function getSyncStatus(): SyncStatus {
   }
 }
 
-function setSyncStatus(status: SyncStatus) {
+export function setSyncStatus(status: SyncStatus) {
   localStorage.setItem(STATUS_KEY, JSON.stringify(status));
   // Dispatch custom event to notify React components to re-render
   window.dispatchEvent(new Event('supabase_sync_changed'));
 }
 
-/**
- * Push all local tables to Supabase.
- * We store each key as a row in a unified 'merdeka_store' table for absolute reliability.
- * Schema of the table:
- *   table name: merdeka_store
- *   columns: 
- *     - key: text (primary key)
- *     - value: jsonb
- *     - updated_at: timestamp with time zone (default now())
- * 
- * If the table does not exist yet or fails, we provide helpful error reporting
- * so the user knows they need to set up the table, or we can fallback gracefully.
- */
 // Only score tables use mergeArrays to support concurrent teacher grading
 export const SCORE_KEYS = [
   'merdeka_formative_scores',
   'merdeka_summative_scope_scores',
   'merdeka_semester_scores'
+];
+
+// Tables where deletion is authoritative (local deletions should remove remote rows)
+export const MASTER_TABLES = [
+  'merdeka_academic_years',
+  'merdeka_semesters',
+  'merdeka_profiles',
+  'merdeka_teachers',
+  'merdeka_classes',
+  'merdeka_subjects',
+  'merdeka_students',
+  'merdeka_assignments',
+  'merdeka_learning_objectives',
+  'merdeka_material_scopes'
 ];
 
 /**
@@ -147,8 +148,90 @@ function mergeArrays(storeKey: string, local: any[], remote: any[]): any[] {
   return Array.from(mergedMap.values());
 }
 
+/**
+ * Push data into a dedicated separate relational table in Supabase.
+ * Supports chunking and authoritative deletion for master records.
+ */
+async function pushToDedicatedTable(tableName: string, localItems: any[]): Promise<boolean> {
+  if (!Array.isArray(localItems)) return true;
+
+  try {
+    // 1. For master tables, handle deletions if items were removed locally
+    if (MASTER_TABLES.includes(tableName)) {
+      const { data: remoteRows, error: selError } = await supabase
+        .from(tableName)
+        .select('id');
+
+      if (!selError && Array.isArray(remoteRows)) {
+        const localIdSet = new Set(localItems.map(item => String(item.id)));
+        const idsToDelete = remoteRows
+          .map(r => String(r.id))
+          .filter(id => !localIdSet.has(id));
+
+        if (idsToDelete.length > 0) {
+          // Delete in batches of 100
+          for (let i = 0; i < idsToDelete.length; i += 100) {
+            const batch = idsToDelete.slice(i, i + 100);
+            await supabase.from(tableName).delete().in('id', batch);
+          }
+        }
+      }
+    }
+
+    // 2. Upsert items in batches of 100
+    if (localItems.length > 0) {
+      for (let i = 0; i < localItems.length; i += 100) {
+        const batch = localItems.slice(i, i + 100).map(item => {
+          // Ensure valid structure & timestamp
+          return {
+            ...item,
+            updated_at: item.updated_at || new Date().toISOString()
+          };
+        });
+
+        const { error: upsertError } = await supabase
+          .from(tableName)
+          .upsert(batch, { onConflict: 'id' });
+
+        if (upsertError) {
+          console.warn(`[pushToDedicatedTable] Error upserting to ${tableName}:`, upsertError);
+          return false;
+        }
+      }
+    }
+
+    return true;
+  } catch (err) {
+    console.warn(`[pushToDedicatedTable] Exception for ${tableName}:`, err);
+    return false;
+  }
+}
+
+/**
+ * Pull rows directly from a dedicated separate table in Supabase.
+ */
+async function pullFromDedicatedTable(tableName: string): Promise<any[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from(tableName)
+      .select('*');
+
+    if (error) {
+      // Table might not exist yet in Supabase
+      return null;
+    }
+
+    return Array.isArray(data) ? data : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Store-based fallback helper for backwards compatibility and JSON snapshot
+ */
 async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
-  const maxRetries = 10;
+  const maxRetries = 5;
   let attempt = 0;
 
   while (attempt < maxRetries) {
@@ -162,8 +245,6 @@ async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
       .maybeSingle();
 
     if (fetchError) {
-      console.error(`[fetchMergeAndSave] Fetch error for key ${key}:`, fetchError);
-      // Wait a bit and retry
       await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
       continue;
     }
@@ -176,7 +257,6 @@ async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
         finalData = mergeArrays(key, localData, remoteRow.value);
       }
 
-      // 2. Try to update conditionally using the fetched updated_at to ensure no race condition
       let query = supabase
         .from('merdeka_store')
         .update({
@@ -194,26 +274,19 @@ async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
       const { data: updateData, error: updateError } = await query.select();
 
       if (updateError) {
-        console.warn(`[fetchMergeAndSave] Update error on attempt ${attempt}:`, updateError);
         await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
         continue;
       }
 
-      // If no rows were updated (updateData is empty or null), it means updated_at changed under us!
       if (!updateData || updateData.length === 0) {
-        console.warn(`[fetchMergeAndSave] Concurrency conflict detected for key ${key} on attempt ${attempt}. Retrying...`);
-        // Jittered backoff
         await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 150));
         continue;
       }
 
-      // Success! Update localStorage with the merged data
       localStorage.setItem(key, JSON.stringify(finalData));
-      window.dispatchEvent(new Event('merdeka_db_synced'));
       return finalData;
 
     } else {
-      // Remote row does not exist. Try to insert.
       const { error: insertError } = await supabase
         .from('merdeka_store')
         .insert({
@@ -223,38 +296,52 @@ async function fetchMergeAndSave(key: string, localData: any): Promise<any> {
         });
 
       if (insertError) {
-        // If insert failed due to duplicate key, someone else inserted it first. Retry!
-        console.warn(`[fetchMergeAndSave] Insert failed for key ${key} on attempt ${attempt} (likely duplicate). Retrying...`, insertError);
         await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
         continue;
       }
 
-      // Success! Update localStorage
       localStorage.setItem(key, JSON.stringify(finalData));
-      window.dispatchEvent(new Event('merdeka_db_synced'));
       return finalData;
     }
   }
 
-  throw new Error(`Gagal menyimpan data "${key}" setelah ${maxRetries} percobaan karena konflik sinkronisasi.`);
+  return localData;
 }
 
+/**
+ * Push all local tables to Supabase.
+ * Writes both to dedicated relational tables (merdeka_teachers, merdeka_students, etc.)
+ * AND to the fallback merdeka_store for maximum reliability and backward compatibility.
+ */
 export async function pushToSupabase(): Promise<boolean> {
   setSyncStatus({ status: 'syncing', lastSync: getSyncStatus().lastSync, errorMessage: null });
   
   try {
+    let dedicatedSuccessCount = 0;
+
     for (const key of SYNC_KEYS) {
       const localData = localStorage.getItem(key);
       if (localData === null) continue;
 
-      let parsed;
+      let parsed: any[];
       try {
         parsed = JSON.parse(localData);
       } catch {
         continue;
       }
 
-      await fetchMergeAndSave(key, parsed);
+      // 1. Push to dedicated relational table
+      const dedicatedSuccess = await pushToDedicatedTable(key, parsed);
+      if (dedicatedSuccess) {
+        dedicatedSuccessCount++;
+      }
+
+      // 2. Also save to merdeka_store as secondary snapshot/fallback
+      try {
+        await fetchMergeAndSave(key, parsed);
+      } catch (err) {
+        // Silently continue if store fails, primary goal is relational tables
+      }
     }
 
     setSyncStatus({
@@ -278,45 +365,64 @@ export async function pushToSupabase(): Promise<boolean> {
 }
 
 /**
- * Pull all tables from Supabase and overwrite localStorage.
+ * Pull tables from Supabase and overwrite localStorage.
+ * Prioritizes dedicated relational tables, with fallback to merdeka_store.
  */
 export async function pullFromSupabase(): Promise<boolean> {
   setSyncStatus({ status: 'syncing', lastSync: getSyncStatus().lastSync, errorMessage: null });
 
   try {
-    const { data, error } = await supabase
-      .from('merdeka_store')
-      .select('*');
+    let pulledCount = 0;
 
-    if (error) {
-      throw new Error(`Gagal mengambil data: ${error.message}`);
-    }
+    // 1. Try pulling from dedicated tables first
+    for (const key of SYNC_KEYS) {
+      const dedicatedRows = await pullFromDedicatedTable(key);
+      if (dedicatedRows !== null && dedicatedRows.length > 0) {
+        const localRaw = localStorage.getItem(key);
+        let finalVal = dedicatedRows;
 
-    if (!data || data.length === 0) {
-      throw new Error('Supabase database kosong. Klik "Kirim ke Supabase" untuk mengunggah data lokal Anda terlebih dahulu.');
-    }
-
-    // Update localStorage
-    let updatedCount = 0;
-    for (const row of data) {
-      if (SYNC_KEYS.includes(row.key)) {
-        const localRaw = localStorage.getItem(row.key);
-        let finalVal = row.value;
-        if (localRaw && SCORE_KEYS.includes(row.key)) {
+        if (localRaw && SCORE_KEYS.includes(key)) {
           try {
             const localParsed = JSON.parse(localRaw);
-            if (Array.isArray(localParsed) && Array.isArray(row.value)) {
-              finalVal = mergeArrays(row.key, localParsed, row.value);
+            if (Array.isArray(localParsed)) {
+              finalVal = mergeArrays(key, localParsed, dedicatedRows);
             }
           } catch (e) {}
         }
-        localStorage.setItem(row.key, JSON.stringify(finalVal));
-        updatedCount++;
+
+        localStorage.setItem(key, JSON.stringify(finalVal));
+        pulledCount++;
       }
     }
 
-    if (updatedCount === 0) {
-      throw new Error('Tidak ada data penilaian kurikulum merdeka yang cocok ditemukan di Supabase.');
+    // 2. If dedicated tables had no data, fallback to merdeka_store
+    if (pulledCount === 0) {
+      const { data: storeData, error: storeError } = await supabase
+        .from('merdeka_store')
+        .select('*');
+
+      if (!storeError && Array.isArray(storeData) && storeData.length > 0) {
+        for (const row of storeData) {
+          if (SYNC_KEYS.includes(row.key)) {
+            const localRaw = localStorage.getItem(row.key);
+            let finalVal = row.value;
+            if (localRaw && SCORE_KEYS.includes(row.key)) {
+              try {
+                const localParsed = JSON.parse(localRaw);
+                if (Array.isArray(localParsed) && Array.isArray(row.value)) {
+                  finalVal = mergeArrays(row.key, localParsed, row.value);
+                }
+              } catch (e) {}
+            }
+            localStorage.setItem(row.key, JSON.stringify(finalVal));
+            pulledCount++;
+          }
+        }
+      }
+    }
+
+    if (pulledCount === 0) {
+      throw new Error('Database Supabase kosong atau tabel belum dibuat. Jalankan skrip SQL di Supabase dan klik "Kirim ke Supabase (Push)" untuk mengisi data awal.');
     }
 
     setSyncStatus({
@@ -325,7 +431,6 @@ export async function pullFromSupabase(): Promise<boolean> {
       errorMessage: null
     });
 
-    // Reload state inside current window context
     window.dispatchEvent(new Event('merdeka_db_synced'));
     return true;
   } catch (err: any) {
@@ -343,16 +448,20 @@ const queuePromises: Record<string, Promise<any>> = {};
 
 /**
  * Background auto-push function for individual table mutations.
- * Doesn't block the UI, silent execution.
+ * Updates both the dedicated relational table and the merdeka_store.
  */
 export async function queueAutoPush(key: string, data: any): Promise<void> {
   if (!SYNC_KEYS.includes(key)) return;
   
-  // Chain onto the parent promise to serialize background saves and prevent concurrent overlapping calls
   const parentPromise = queuePromises[key] || Promise.resolve();
   
   const currentPromise = parentPromise.then(async () => {
     try {
+      // 1. Sync dedicated relational table
+      if (Array.isArray(data)) {
+        await pushToDedicatedTable(key, data);
+      }
+      // 2. Sync to backup store
       await fetchMergeAndSave(key, data);
       window.dispatchEvent(new Event('merdeka_db_synced'));
     } catch (err) {

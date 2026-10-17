@@ -55,18 +55,15 @@ export default function App() {
 
     refreshStats();
 
-    // Auto-pull from Supabase on startup to sync the newest cloud state if table is active
+    // Auto-pull from Supabase on startup to sync the newest cloud state from separate tables or store
     const autoPullOnStart = async () => {
       try {
-        const { data, error } = await supabase.from('merdeka_store').select('key').limit(1);
-        if (!error && data && data.length > 0) {
-          const success = await pullFromSupabase();
-          if (success) {
-            cleanupDummyData();
-            refreshStats();
-            const session = db.getSession();
-            if (session) setSessionUser(session);
-          }
+        const success = await pullFromSupabase();
+        if (success) {
+          cleanupDummyData();
+          refreshStats();
+          const session = db.getSession();
+          if (session) setSessionUser(session);
         } else {
           cleanupDummyData();
           refreshStats();
@@ -74,6 +71,7 @@ export default function App() {
       } catch (err) {
         console.warn('[Supabase Auto-Sync] Background pull skipped or failed.', err);
         cleanupDummyData();
+        refreshStats();
       }
     };
 
