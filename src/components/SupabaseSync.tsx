@@ -5,7 +5,8 @@ import { ToastType } from './Toast';
 import { 
   Database, RefreshCw, CheckCircle2, AlertCircle, Copy, Check, 
   ExternalLink, Lock, Server, HelpCircle, Cloud, ArrowUpRight, ArrowDownLeft,
-  Table, Download, Code2, Layers, CheckSquare, Sparkles, FileText, Radio, Zap
+  Table, Download, Code2, Layers, CheckSquare, Sparkles, FileText, Radio, Zap,
+  GitBranch, Globe, Terminal, ShieldCheck, Share2
 } from 'lucide-react';
 
 interface SupabaseSyncProps {
@@ -128,6 +129,7 @@ export function SupabaseSync({ addToast, onRefreshStats }: SupabaseSyncProps) {
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [testMessage, setTestMessage] = useState<string | null>(null);
   const [detectedTables, setDetectedTables] = useState<string[]>([]);
+  const [tableCounts, setTableCounts] = useState<Record<string, number>>({});
   const [selectedTableTab, setSelectedTableTab] = useState<'all' | 'Master Data' | 'Penilaian' | 'Sistem'>('all');
 
   const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://anadwoytkjvuknucwymd.supabase.co';
@@ -135,6 +137,35 @@ export function SupabaseSync({ addToast, onRefreshStats }: SupabaseSyncProps) {
 
   const maskedUrl = supabaseUrl.replace(/(https?:\/\/)[^.]+(\.supabase\.co)/, '$1******$2');
   const maskedKey = anonKey.slice(0, 8) + '...' + anonKey.slice(-8);
+
+  // Automatically check live row counts in Supabase on mount
+  useEffect(() => {
+    let isMounted = true;
+    const loadCounts = async () => {
+      const counts: Record<string, number> = {};
+      const detected: string[] = [];
+      const tablesToCheck = [
+        'merdeka_formative_scores', 'merdeka_summative_scope_scores', 'merdeka_semester_scores',
+        'merdeka_students', 'merdeka_teachers', 'merdeka_classes', 'merdeka_subjects',
+        'merdeka_learning_objectives', 'merdeka_material_scopes', 'merdeka_academic_years', 'merdeka_semesters'
+      ];
+      for (const t of tablesToCheck) {
+        try {
+          const { count, error } = await supabase.from(t).select('*', { count: 'exact', head: true });
+          if (!error && count !== null) {
+            counts[t] = count;
+            detected.push(t);
+          }
+        } catch {}
+      }
+      if (isMounted) {
+        setTableCounts(counts);
+        if (detected.length > 0) setDetectedTables(detected);
+      }
+    };
+    loadCounts();
+    return () => { isMounted = false; };
+  }, []);
 
   const sqlSetupCommand = `-- ====================================================================
 -- SKRIP SQL LENGKAP: DATABASE KURIKULUM MERDEKA (SUPABASE POSTGRESQL)
@@ -418,26 +449,31 @@ end $$;`;
 
     try {
       const detected: string[] = [];
+      const counts: Record<string, number> = {};
       const checkList = [
-        'merdeka_teachers', 'merdeka_classes', 'merdeka_students', 
-        'merdeka_subjects', 'merdeka_assignments', 'merdeka_profiles',
-        'merdeka_formative_scores', 'merdeka_summative_scope_scores', 'merdeka_semester_scores'
+        'merdeka_formative_scores', 'merdeka_summative_scope_scores', 'merdeka_semester_scores',
+        'merdeka_students', 'merdeka_teachers', 'merdeka_classes', 'merdeka_subjects',
+        'merdeka_assignments', 'merdeka_profiles', 'merdeka_learning_objectives', 
+        'merdeka_material_scopes', 'merdeka_academic_years', 'merdeka_semesters'
       ];
       
       for (const t of checkList) {
         try {
-          const { error } = await supabase.from(t).select('id').limit(1);
+          const { count, error } = await supabase.from(t).select('*', { count: 'exact', head: true });
           if (!error) {
             detected.push(t);
+            counts[t] = count ?? 0;
           }
         } catch {}
       }
 
       setDetectedTables(detected);
+      setTableCounts(counts);
 
       if (detected.length >= 4) {
         setTestStatus('success');
-        setTestMessage(`Koneksi aktif! Terdeteksi ${detected.length} dari ${checkList.length} tabel relasional terpisah siap digunakan dengan sinkronisasi realtime.`);
+        const totalScores = (counts['merdeka_formative_scores'] || 0) + (counts['merdeka_summative_scope_scores'] || 0) + (counts['merdeka_semester_scores'] || 0);
+        setTestMessage(`Koneksi aktif! Terdeteksi ${detected.length} dari ${checkList.length} tabel relasional di cloud Supabase. Terdapat ${totalScores.toLocaleString()} data nilai (${(counts['merdeka_formative_scores'] || 0).toLocaleString()} formatif & ${(counts['merdeka_summative_scope_scores'] || 0).toLocaleString()} sumatif) serta ${(counts['merdeka_students'] || 0).toLocaleString()} siswa.`);
         addToast('success', 'Koneksi Berhasil', 'Tabel terpisah di Supabase terverifikasi sempurna!');
       } else {
         setTestStatus('error');
@@ -682,10 +718,17 @@ end $$;`;
                   </p>
                 </div>
 
-                <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800/60">
-                  <div className="text-[10px] text-slate-400 font-mono truncate">
-                    Kolom: {tbl.columns.join(', ')}
-                  </div>
+                <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800/60 flex items-center justify-between text-[10px]">
+                  <span className="text-slate-400 font-mono truncate">
+                    {tbl.columns.length} Kolom
+                  </span>
+                  {tableCounts[tbl.name] !== undefined ? (
+                    <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md">
+                      {tableCounts[tbl.name].toLocaleString()} Baris di Cloud
+                    </span>
+                  ) : isDetected ? (
+                    <span className="text-indigo-600 dark:text-indigo-400 font-medium">Terhubung</span>
+                  ) : null}
                 </div>
               </div>
             );
@@ -702,7 +745,7 @@ end $$;`;
               Skrip SQL Lengkap (Hapus Tabel Lama & Buat 14 Tabel Baru)
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Jalankan sekali di SQL Editor Supabase untuk menghapus <code>merdeka_store</code>, membuat 14 tabel terpisah, dan mengaktifkan Realtime.
+              Jalankan sekali di SQL Editor Supabase untuk memastikan 14 tabel terpisah dan replikasi Realtime aktif.
             </p>
           </div>
           
@@ -733,15 +776,121 @@ end $$;`;
               <li>Klik menu <strong>SQL Editor</strong> di bilah navigasi kiri.</li>
               <li>Klik tombol <strong>New Query</strong> (+).</li>
               <li>Salin kode SQL di bawah ini dan tempelkan (Paste).</li>
-              <li>Klik tombol hijau <strong>Run</strong> (atau tekan Ctrl+Enter). Tabel lama <code>merdeka_store</code> akan otomatis terhapus dan 14 tabel baru akan terbuat berikut replikasi realtimenya.</li>
-              <li>Kembali ke halaman ini dan klik tombol <strong>"Kirim ke Supabase (Push)"</strong> untuk menyalin data lokal ke tabel baru.</li>
+              <li>Klik tombol hijau <strong>Run</strong> (atau tekan Ctrl+Enter). Tabel baru beserta replikasi Realtime akan aktif.</li>
             </ol>
           </div>
 
           <div className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800">
-            <pre className="p-4 bg-slate-950 text-slate-200 font-mono text-xs overflow-x-auto leading-relaxed max-h-96">
+            <pre className="p-4 bg-slate-950 text-slate-200 font-mono text-xs overflow-x-auto leading-relaxed max-h-80">
               <code>{sqlSetupCommand}</code>
             </pre>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. PANDUAN DEPLOY KE GITHUB & VERCEL */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+        <div className="p-5 border-b border-slate-150 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white">
+              <Globe className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-850 dark:text-slate-100">
+                Panduan Menyelaraskan Aplikasi ke GitHub & Vercel
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Cara mempublikasikan aplikasi agar dapat diakses oleh seluruh guru dan admin dari HP atau laptop mana pun secara online.
+              </p>
+            </div>
+          </div>
+          <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 text-xs font-semibold rounded-full border border-emerald-100">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            Siap Publikasi
+          </span>
+        </div>
+
+        <div className="p-6 space-y-6">
+          {/* Step 1: GitHub */}
+          <div className="border border-slate-150 dark:border-slate-800 rounded-xl p-4 bg-slate-50/40 dark:bg-slate-800/20 space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-slate-900 text-white flex items-center justify-center text-xs font-bold">1</div>
+              <h4 className="text-xs font-bold text-slate-850 dark:text-slate-100 flex items-center gap-1.5">
+                <GitBranch className="w-4 h-4 text-slate-700 dark:text-slate-300" />
+                Unggah Proyek ke GitHub
+              </h4>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+              Buat repositori baru di akun GitHub Anda (misal: <code>kurikulum-merdeka-sekolah</code>), kemudian jalankan perintah git berikut di terminal laptop Anda:
+            </p>
+            <div className="bg-slate-950 rounded-lg p-3 text-emerald-400 font-mono text-[11px] space-y-1">
+              <div>git init</div>
+              <div>git add .</div>
+              <div>git commit -m "feat: implementasi kurikulum merdeka dengan sinkronisasi realtime supabase"</div>
+              <div>git branch -M main</div>
+              <div>git remote add origin https://github.com/USERNAME-ANDA/kurikulum-merdeka-sekolah.git</div>
+              <div>git push -u origin main</div>
+            </div>
+          </div>
+
+          {/* Step 2: Vercel Deploy */}
+          <div className="border border-slate-150 dark:border-slate-800 rounded-xl p-4 bg-slate-50/40 dark:bg-slate-800/20 space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-indigo-600 text-white flex items-center justify-center text-xs font-bold">2</div>
+              <h4 className="text-xs font-bold text-slate-850 dark:text-slate-100 flex items-center gap-1.5">
+                <Globe className="w-4 h-4 text-indigo-600" />
+                Deploy ke Vercel (Gratis & Cepat)
+              </h4>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+              1. Buka <a href="https://vercel.com" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-semibold">vercel.com</a> dan masuk menggunakan akun GitHub Anda.<br/>
+              2. Klik tombol <strong>Add New... &rarr; Project</strong>, lalu pilih repositori GitHub Anda.<br/>
+              3. Pada bagian <strong>Environment Variables</strong> di halaman konfigurasi Vercel, masukkan 2 variabel penting berikut:
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+              <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg">
+                <div className="flex items-center justify-between text-xs font-mono font-bold text-slate-700 dark:text-slate-300">
+                  <span>Key:</span>
+                  <span className="text-indigo-600">VITE_SUPABASE_URL</span>
+                </div>
+                <div className="text-[11px] font-mono text-slate-500 break-all mt-1">
+                  https://anadwoytkjvuknucwymd.supabase.co
+                </div>
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg">
+                <div className="flex items-center justify-between text-xs font-mono font-bold text-slate-700 dark:text-slate-300">
+                  <span>Key:</span>
+                  <span className="text-indigo-600">VITE_SUPABASE_ANON_KEY</span>
+                </div>
+                <div className="text-[11px] font-mono text-slate-500 break-all mt-1">
+                  eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                </div>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed pt-1">
+              4. Klik tombol <strong>Deploy</strong>. Dalam 1-2 menit, Vercel akan memberikan alamat website publik sekolah Anda (contoh: <code>https://kurikulum-merdeka-sekolah.vercel.app</code>).
+            </p>
+          </div>
+
+          {/* Step 3: Multi-device usage */}
+          <div className="border border-emerald-150 dark:border-emerald-900/40 rounded-xl p-4 bg-emerald-50/30 dark:bg-emerald-950/20 space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-emerald-600 text-white flex items-center justify-center text-xs font-bold">3</div>
+              <h4 className="text-xs font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-1.5">
+                <Share2 className="w-4 h-4 text-emerald-600" />
+                Akses Bersama di Seluruh Perangkat (HP, Laptop, Tablet)
+              </h4>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Bagikan link website Vercel tersebut kepada seluruh guru dan administrator. Karena semua perangkat mengakses database Supabase yang sama:
+            </p>
+            <ul className="list-disc list-inside text-xs text-slate-600 dark:text-slate-400 space-y-1 pl-1">
+              <li>Saat guru menginput nilai formatif/sumatif dari HP di kelas, data <strong>langsung masuk ke Supabase</strong> dan disiarkan dalam hitungan milidetik.</li>
+              <li>Admin yang sedang membuka halaman Rekapitulasi di laptop kantor langsung melihat nilainya terisi secara otomatis tanpa perlu refresh manual.</li>
+              <li>Data aman tersimpan di cloud Supabase dan tidak akan hilang meskipun browser ditutup atau berganti gawai.</li>
+            </ul>
           </div>
         </div>
       </div>

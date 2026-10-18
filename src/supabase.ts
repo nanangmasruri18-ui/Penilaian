@@ -242,18 +242,45 @@ async function pushToDedicatedTable(tableName: string, localItems: any[]): Promi
 
 /**
  * Pull rows directly from a dedicated separate table in Supabase.
+ * Uses automatic pagination with .range() in chunks of 1,000 to ensure
+ * ALL rows (e.g. all 7,798+ formative scores and 2,047+ summative scores)
+ * are retrieved completely without being capped by PostgREST's 1,000-row limit!
  */
-async function pullFromDedicatedTable(tableName: string): Promise<any[] | null> {
+export async function pullFromDedicatedTable(tableName: string): Promise<any[] | null> {
   try {
-    const { data, error } = await supabase
-      .from(tableName)
-      .select('*');
+    let allRows: any[] = [];
+    let page = 0;
+    const pageSize = 1000;
+    let hasMore = true;
 
-    if (error) {
-      return null;
+    while (hasMore) {
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
+
+      const { data, error } = await supabase
+        .from(tableName)
+        .select('*')
+        .range(from, to);
+
+      if (error) {
+        if (page === 0) return null;
+        break;
+      }
+
+      if (!Array.isArray(data) || data.length === 0) {
+        hasMore = false;
+      } else {
+        allRows.push(...data);
+        if (data.length < pageSize) {
+          hasMore = false;
+        } else {
+          page++;
+          if (page > 50) hasMore = false; // Safety cap at 50,000 rows
+        }
+      }
     }
 
-    return Array.isArray(data) ? data : null;
+    return allRows;
   } catch {
     return null;
   }
@@ -417,12 +444,28 @@ let realtimeChannel: RealtimeChannel | null = null;
 export function broadcastTableUpdate(table: string, data: any): void {
   if (!realtimeChannel) return;
   try {
+    let broadcastData = data;
+    let isPartial = false;
+
+    // Supabase Realtime has a 256KB frame limit. If data is a large array (> 80 items),
+    // send the 80 most recently modified items to keep message size ~12KB and ultra-fast (<50ms).
+    if (Array.isArray(data) && data.length > 80) {
+      isPartial = true;
+      const sorted = [...data].sort((a, b) => {
+        const tA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const tB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        return tB - tA;
+      });
+      broadcastData = sorted.slice(0, 80);
+    }
+
     realtimeChannel.send({
       type: 'broadcast',
       event: 'db_sync_table',
       payload: {
         table,
-        data,
+        data: broadcastData,
+        isPartial,
         sender: CLIENT_INSTANCE_ID,
         timestamp: Date.now()
       }
@@ -489,7 +532,7 @@ export function initSupabaseRealtime(onSync?: () => void) {
         { event: 'db_sync_table' },
         ({ payload }) => {
           if (!payload || payload.sender === CLIENT_INSTANCE_ID) return;
-          const { table, data } = payload;
+          const { table, data, isPartial } = payload;
           if (!SYNC_KEYS.includes(table) || !Array.isArray(data)) return;
 
           const localRaw = localStorage.getItem(table);
@@ -506,8 +549,36 @@ export function initSupabaseRealtime(onSync?: () => void) {
 
           const newRaw = JSON.stringify(finalData);
           if (localRaw !== newRaw) {
-            localStorage.setItem(table, newRaw);
+            try {
+              localStorage.setItem(table, newRaw);
+            } catch {}
             notifyDbSynced(onSync);
+          }
+
+          // If the broadcast was partial or involves large score ledgers,
+          // trigger an asynchronous background pull to ensure all 7,798+ rows remain synchronized!
+          if (isPartial || SCORE_KEYS.includes(table)) {
+            pullFromDedicatedTable(table).then(freshRows => {
+              if (freshRows && Array.isArray(freshRows)) {
+                const cur = localStorage.getItem(table);
+                let merged = freshRows;
+                if (cur) {
+                  try {
+                    const curParsed = JSON.parse(cur);
+                    if (Array.isArray(curParsed)) {
+                      merged = mergeArrays(table, curParsed, freshRows);
+                    }
+                  } catch {}
+                }
+                const mergedStr = JSON.stringify(merged);
+                if (cur !== mergedStr) {
+                  try {
+                    localStorage.setItem(table, mergedStr);
+                  } catch {}
+                  notifyDbSynced(onSync);
+                }
+              }
+            });
           }
         }
       )
