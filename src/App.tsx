@@ -8,7 +8,7 @@ import {
   getTeacherAssignedClassesAndSubjects, logAudit, cleanupDummyData 
 } from './db';
 import { 
-  supabase, pullFromSupabase, pushToSupabase, getSyncStatus, SyncStatus, initSupabaseRealtime 
+  supabase, pullFromSupabase, pushToSupabase, getSyncStatus, SyncStatus, initSupabaseRealtime, SYNC_KEYS 
 } from './supabase';
 import { Login } from './components/Login';
 import { ToastContainer, ToastMessage, ToastType } from './components/Toast';
@@ -80,11 +80,12 @@ export default function App() {
 
     autoPullOnStart();
 
-    // 3. Listen to tab/browser visibility changes with 30s throttle
-    let lastVisibilityPull = Date.now();
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && Date.now() - lastVisibilityPull > 30000) {
-        lastVisibilityPull = Date.now();
+    // 3. Ultra-fast focus & visibility listener (syncs immediately when switching back to tab/browser)
+    let lastFocusPull = 0;
+    const triggerInstantSync = () => {
+      const now = Date.now();
+      if (now - lastFocusPull > 2000) {
+        lastFocusPull = now;
         pullFromSupabase({ silent: true, autoPushIfEmpty: false }).then(() => {
           refreshStats();
           const s = db.getSession();
@@ -92,18 +93,35 @@ export default function App() {
         });
       }
     };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // 4. Gentle fallback polling (only runs every 90s if tab is visible)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        triggerInstantSync();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', triggerInstantSync);
+
+    // 4. Background heartbeat sync pulse (runs every 12s when tab is active)
+    // Only triggers React re-renders if remote data actually changed!
     const syncInterval = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        const curStatus = getSyncStatus();
-        // If realtime websocket is disconnected, poll to maintain sync
-        if (!curStatus.isRealtimeConnected) {
-          pullFromSupabase({ silent: true, autoPushIfEmpty: false });
-        }
+        pullFromSupabase({ silent: true, autoPushIfEmpty: false }).then(() => {
+          refreshStats();
+        });
       }
-    }, 90000);
+    }, 12000);
+
+    // 5. Cross-tab instantaneous synchronization for the same browser
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key && (SYNC_KEYS.includes(e.key) || e.key === 'merdeka_session')) {
+        refreshStats();
+        const s = db.getSession();
+        if (s) setSessionUser(s);
+        window.dispatchEvent(new Event('merdeka_db_synced'));
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
 
     // Event listener for manual sync reload trigger and status change
     const handleDbSynced = () => {
@@ -122,6 +140,8 @@ export default function App() {
     return () => {
       clearInterval(syncInterval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', triggerInstantSync);
+      window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('merdeka_db_synced', handleDbSynced);
       window.removeEventListener('supabase_sync_changed', handleSyncStatusChange);
     };

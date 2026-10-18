@@ -137,8 +137,12 @@ function mergeArrays(storeKey: string, local: any[], remote: any[]): any[] {
       } else {
         const localTime = localItem.updated_at ? new Date(localItem.updated_at).getTime() : 0;
         const remoteTime = remoteItem.updated_at ? new Date(remoteItem.updated_at).getTime() : 0;
-        if (localTime >= remoteTime) {
+        // If local item is strictly newer, preserve local edits
+        if (localTime > remoteTime) {
           mergedMap.set(k, { ...remoteItem, ...localItem });
+        } else {
+          // Remote server data is authoritative when timestamps are equal or remote is newer
+          mergedMap.set(k, { ...localItem, ...remoteItem });
         }
       }
     }
@@ -369,12 +373,44 @@ export async function pullFromSupabase(options: PullOptions = {}): Promise<boole
   }
 }
 
+// Unique identifier for this browser/tab instance to prevent echo loops
+export const CLIENT_INSTANCE_ID = 'cli_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
+
+// Real-time synchronization channel
+let realtimeChannel: RealtimeChannel | null = null;
+
+/**
+ * Broadcast local table update to all other connected browsers/devices in real time (< 50ms)
+ * through Supabase Realtime WebSockets.
+ */
+export function broadcastTableUpdate(table: string, data: any): void {
+  if (!realtimeChannel) return;
+  try {
+    realtimeChannel.send({
+      type: 'broadcast',
+      event: 'db_sync_table',
+      payload: {
+        table,
+        data,
+        sender: CLIENT_INSTANCE_ID,
+        timestamp: Date.now()
+      }
+    });
+  } catch {
+    // Non-blocking fallback
+  }
+}
+
 // Debounced auto-push for fast UI response without freezing keystrokes
 const debounceTimers: Record<string, any> = {};
 
 export async function queueAutoPush(key: string, data: any): Promise<void> {
   if (!SYNC_KEYS.includes(key)) return;
 
+  // 1. Immediately broadcast to other open browsers/laptops/phones over WebSocket (0ms delay)
+  broadcastTableUpdate(key, data);
+
+  // 2. Debounce the PostgreSQL upsert to Supabase server
   if (debounceTimers[key]) {
     clearTimeout(debounceTimers[key]);
   }
@@ -394,9 +430,6 @@ export async function queueAutoPush(key: string, data: any): Promise<void> {
   }, 300);
 }
 
-// Real-time synchronization channel
-let realtimeChannel: RealtimeChannel | null = null;
-
 export function initSupabaseRealtime(onSync?: () => void) {
   if (realtimeChannel) {
     return realtimeChannel;
@@ -404,7 +437,41 @@ export function initSupabaseRealtime(onSync?: () => void) {
 
   try {
     realtimeChannel = supabase
-      .channel('merdeka_global_changes')
+      .channel('merdeka_realtime_sync', {
+        config: {
+          broadcast: { ack: false, self: false }
+        }
+      })
+      // A. Listen to ultra-fast peer-to-peer broadcast across all active browsers and devices
+      .on(
+        'broadcast',
+        { event: 'db_sync_table' },
+        ({ payload }) => {
+          if (!payload || payload.sender === CLIENT_INSTANCE_ID) return;
+          const { table, data } = payload;
+          if (!SYNC_KEYS.includes(table) || !Array.isArray(data)) return;
+
+          const localRaw = localStorage.getItem(table);
+          let finalData = data;
+
+          if (localRaw && SCORE_KEYS.includes(table)) {
+            try {
+              const localParsed = JSON.parse(localRaw);
+              if (Array.isArray(localParsed)) {
+                finalData = mergeArrays(table, localParsed, data);
+              }
+            } catch {}
+          }
+
+          const newRaw = JSON.stringify(finalData);
+          if (localRaw !== newRaw) {
+            localStorage.setItem(table, newRaw);
+            window.dispatchEvent(new Event('merdeka_db_synced'));
+            if (onSync) onSync();
+          }
+        }
+      )
+      // B. Listen to direct PostgreSQL changes from Supabase
       .on(
         'postgres_changes',
         { event: '*', schema: 'public' },
@@ -456,6 +523,12 @@ export function initSupabaseRealtime(onSync?: () => void) {
           setSyncStatus({ isRealtimeConnected: true });
         } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
           setSyncStatus({ isRealtimeConnected: false });
+          // Auto-reconnect after 3 seconds if disconnected
+          setTimeout(() => {
+            if (realtimeChannel) {
+              realtimeChannel.subscribe();
+            }
+          }, 3000);
         }
       });
   } catch {
