@@ -7,6 +7,7 @@ import {
   AcademicYear, Semester, LearningObjective, MaterialScope,
   FormativeScore, SummativeScopeScore, SemesterScore
 } from '../types';
+import { pullFromSupabase } from '../supabase';
 import { Modal } from './Modal';
 import { 
   Users, Layers, GraduationCap, BookOpen, Calendar, Clock, 
@@ -49,7 +50,12 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
   });
 
   // Current active Context (Year & Semester)
-  const context = useMemo(() => getActiveContext(), []);
+  const context = useMemo(() => {
+    return {
+      year: academicYears.find(y => y.aktif) || academicYears[0] || null,
+      semester: semesters.find(s => s.aktif) || semesters[0] || null
+    };
+  }, [academicYears, semesters]);
 
   // Editable Signature Information (stored in localStorage for convenience/durability, shared with teachers)
   const [kepsekName, setKepsekName] = useState<string>(() => {
@@ -161,6 +167,16 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     onRefreshStats();
   };
 
+  // Auto-sync when switching tabs or receiving realtime event
+  useEffect(() => {
+    syncState();
+    if (currentTab === 'rekap' || currentTab === 'logs') {
+      pullFromSupabase({ silent: true }).then(() => {
+        syncState();
+      });
+    }
+  }, [currentTab]);
+
   useEffect(() => {
     const handleDbSynced = () => {
       syncState();
@@ -170,6 +186,22 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
       window.removeEventListener('merdeka_db_synced', handleDbSynced);
     };
   }, []);
+
+  // Manual fast-sync for Rekapitulasi Nilai
+  const [isRefreshingScores, setIsRefreshingScores] = useState(false);
+  const handleManualSyncRekap = async () => {
+    setIsRefreshingScores(true);
+    try {
+      await pullFromSupabase({ silent: true });
+      syncState();
+      addToast('success', 'Nilai Tersinkron', 'Data nilai terbaru berhasil disinkronkan secara online.');
+    } catch {
+      syncState();
+      addToast('info', 'Tampilan Diperbarui', 'Data nilai lokal telah disegarkan.');
+    } finally {
+      setIsRefreshingScores(false);
+    }
+  };
 
   // --- Modal Forms State ---
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -879,8 +911,8 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
         const actFormative = formativeScores.filter(fs => 
           studentIds.has(fs.student_id) && 
           tpIds.has(fs.tp_id) &&
-          fs.semester === semId &&
-          fs.tahun === yrId
+          (!fs.semester || fs.semester === semId || fs.semester === context.semester?.nama || (semId.includes('ganjil') && fs.semester.toLowerCase().includes('ganjil'))) &&
+          (!fs.tahun || fs.tahun === yrId || fs.tahun === context.year?.nama || (yrId.includes('2025') && fs.tahun.includes('2025')))
         ).length;
         totalActualFormative += actFormative;
         
@@ -893,8 +925,8 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
         const actSummative = summativeScores.filter(ss => 
           studentIds.has(ss.student_id) && 
           scopeIds.has(ss.lingkup_id) &&
-          ss.semester === semId &&
-          ss.tahun === yrId
+          (!ss.semester || ss.semester === semId || ss.semester === context.semester?.nama || (semId.includes('ganjil') && ss.semester.toLowerCase().includes('ganjil'))) &&
+          (!ss.tahun || ss.tahun === yrId || ss.tahun === context.year?.nama || (yrId.includes('2025') && ss.tahun.includes('2025')))
         ).length;
         totalActualSummative += actSummative;
         
@@ -906,8 +938,8 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
         const actSemester = semesterScores.filter(ses => 
           studentIds.has(ses.student_id) && 
           ses.subject_id === asg.subject_id &&
-          ses.semester === semId &&
-          ses.tahun === yrId
+          (!ses.semester || ses.semester === semId || ses.semester === context.semester?.nama || (semId.includes('ganjil') && ses.semester.toLowerCase().includes('ganjil'))) &&
+          (!ses.tahun || ses.tahun === yrId || ses.tahun === context.year?.nama || (yrId.includes('2025') && ses.tahun.includes('2025')))
         ).length;
         totalActualSemester += actSemester;
         
@@ -966,11 +998,25 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     // Get all students in the selected class
     const classStudents = students.filter(s => s.kelas_id === activeClassId);
 
+    // Helper to match semester & academic year across different naming conventions
+    const isMatchingContext = (itemSem?: string, itemYr?: string) => {
+      const matchSem = !itemSem || 
+                       itemSem === semId || 
+                       itemSem === context.semester?.nama || 
+                       (semId.toLowerCase().includes('ganjil') && (itemSem.toLowerCase().includes('ganjil') || itemSem === '1')) ||
+                       (semId.toLowerCase().includes('genap') && (itemSem.toLowerCase().includes('genap') || itemSem === '2'));
+      const matchYr = !itemYr || 
+                      itemYr === yrId || 
+                      itemYr === context.year?.nama || 
+                      (yrId.includes('2025') && itemYr.includes('2025'));
+      return matchSem && matchYr;
+    };
+
     // Build O(1) Fast Lookup Maps for instant evaluation
     const formativeMap = new Map<string, number>();
     for (let i = 0; i < formativeScores.length; i++) {
       const fs = formativeScores[i];
-      if (fs.semester === semId && fs.tahun === yrId) {
+      if (isMatchingContext(fs.semester, fs.tahun)) {
         formativeMap.set(`${fs.student_id}_${fs.tp_id}`, fs.nilai);
       }
     }
@@ -978,7 +1024,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     const summativeMap = new Map<string, number>();
     for (let i = 0; i < summativeScores.length; i++) {
       const ss = summativeScores[i];
-      if (ss.semester === semId && ss.tahun === yrId) {
+      if (isMatchingContext(ss.semester, ss.tahun)) {
         summativeMap.set(`${ss.student_id}_${ss.lingkup_id}`, ss.nilai);
       }
     }
@@ -986,7 +1032,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     const sasMap = new Map<string, number>();
     for (let i = 0; i < semesterScores.length; i++) {
       const ses = semesterScores[i];
-      if (ses.subject_id === activeSubjectId && ses.semester === semId && ses.tahun === yrId) {
+      if (ses.subject_id === activeSubjectId && isMatchingContext(ses.semester, ses.tahun)) {
         sasMap.set(ses.student_id, ses.nilai);
       }
     }
@@ -2110,7 +2156,17 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
               </div>
             </div>
 
-            <div className="flex gap-2 w-full md:w-auto justify-end">
+            <div className="flex flex-wrap gap-2 w-full md:w-auto justify-end">
+              <button
+                type="button"
+                onClick={handleManualSyncRekap}
+                disabled={isRefreshingScores}
+                className="flex items-center justify-center gap-1.5 px-3.5 py-2 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold rounded-xl text-xs transition-all cursor-pointer disabled:opacity-50"
+                title="Sinkronkan data nilai dari database Supabase secara real-time"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingScores ? 'animate-spin text-emerald-600' : 'text-emerald-700'}`} />
+                <span>{isRefreshingScores ? 'Menyelaraskan...' : 'Sinkronkan Nilai Realtime'}</span>
+              </button>
               <button
                 onClick={handleExportExcel}
                 disabled={rekapLedger.rows.length === 0}

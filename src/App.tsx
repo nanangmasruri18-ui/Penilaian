@@ -203,6 +203,12 @@ export default function App() {
     setSessionUser(profile);
     setActiveTab('dashboard');
     refreshStats();
+    // Immediately fetch latest grades, classes, students and state from Supabase for fresh session
+    pullFromSupabase({ silent: true, autoPushIfEmpty: false }).then(() => {
+      refreshStats();
+      const s = db.getSession();
+      if (s) setSessionUser(s);
+    });
   };
 
   // Hard Reset Database to Seeds

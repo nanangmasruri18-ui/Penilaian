@@ -6,7 +6,8 @@ import {
 } from '../db';
 import { 
   LearningObjective, MaterialScope, Student, FormativeScore, 
-  SummativeScopeScore, SemesterScore, Class, Subject 
+  SummativeScopeScore, SemesterScore, Class, Subject,
+  AcademicYear, Semester
 } from '../types';
 import { Modal } from './Modal';
 import { 
@@ -37,9 +38,16 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
   const [formativeScores, setFormativeScores] = useState<FormativeScore[]>(() => db.getFormativeScores());
   const [summativeScores, setSummativeScores] = useState<SummativeScopeScore[]>(() => db.getSummativeScopeScores());
   const [semesterScores, setSemesterScores] = useState<SemesterScore[]>(() => db.getSemesterScores());
+  const [academicYears, setAcademicYears] = useState<AcademicYear[]>(() => db.getAcademicYears());
+  const [semesters, setSemesters] = useState<Semester[]>(() => db.getSemesters());
 
   // Current active Context (Year & Semester)
-  const context = useMemo(() => getActiveContext(), []);
+  const context = useMemo(() => {
+    return {
+      year: academicYears.find(y => y.aktif) || academicYears[0] || null,
+      semester: semesters.find(s => s.aktif) || semesters[0] || null
+    };
+  }, [academicYears, semesters]);
 
   // Sync state helpers
   const syncState = () => {
@@ -49,6 +57,8 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     setFormativeScores(db.getFormativeScores());
     setSummativeScores(db.getSummativeScopeScores());
     setSemesterScores(db.getSemesterScores());
+    setAcademicYears(db.getAcademicYears());
+    setSemesters(db.getSemesters());
     onRefreshStats();
   };
 
@@ -624,11 +634,25 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     const subjectTps = tps.filter(t => t.class_id === activeClassId && t.subject_id === activeSubjectId);
     const subjectScopes = scopes.filter(sc => sc.class_id === activeClassId && sc.subject_id === activeSubjectId);
 
+    // Helper to match semester & academic year across different naming conventions
+    const isMatchingContext = (itemSem?: string, itemYr?: string) => {
+      const matchSem = !itemSem || 
+                       itemSem === semId || 
+                       itemSem === context.semester?.nama || 
+                       (semId.toLowerCase().includes('ganjil') && (itemSem.toLowerCase().includes('ganjil') || itemSem === '1')) ||
+                       (semId.toLowerCase().includes('genap') && (itemSem.toLowerCase().includes('genap') || itemSem === '2'));
+      const matchYr = !itemYr || 
+                      itemYr === yrId || 
+                      itemYr === context.year?.nama || 
+                      (yrId.includes('2025') && itemYr.includes('2025'));
+      return matchSem && matchYr;
+    };
+
     // Build O(1) Fast Lookup Maps
     const formativeMap = new Map<string, number>();
     for (let i = 0; i < formativeScores.length; i++) {
       const fs = formativeScores[i];
-      if (fs.semester === semId && fs.tahun === yrId) {
+      if (isMatchingContext(fs.semester, fs.tahun)) {
         formativeMap.set(`${fs.student_id}_${fs.tp_id}`, fs.nilai);
       }
     }
@@ -636,7 +660,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     const summativeMap = new Map<string, number>();
     for (let i = 0; i < summativeScores.length; i++) {
       const ss = summativeScores[i];
-      if (ss.semester === semId && ss.tahun === yrId) {
+      if (isMatchingContext(ss.semester, ss.tahun)) {
         summativeMap.set(`${ss.student_id}_${ss.lingkup_id}`, ss.nilai);
       }
     }
@@ -644,7 +668,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     const sasMap = new Map<string, number>();
     for (let i = 0; i < semesterScores.length; i++) {
       const ses = semesterScores[i];
-      if (ses.subject_id === activeSubjectId && ses.semester === semId && ses.tahun === yrId) {
+      if (ses.subject_id === activeSubjectId && isMatchingContext(ses.semester, ses.tahun)) {
         sasMap.set(ses.student_id, ses.nilai);
       }
     }

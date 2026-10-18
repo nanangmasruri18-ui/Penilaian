@@ -265,7 +265,7 @@ export function getTeacherAssignedClassesAndSubjects(teacherId: string) {
   };
 }
 
-// Formative Grade Management
+// Formative Grade Management (Manual Save)
 export function saveFormativeGrades(
   grades: { student_id: string; tp_id: string; nilai: number }[],
   semesterId: string,
@@ -276,20 +276,31 @@ export function saveFormativeGrades(
   const updated = [...current];
 
   grades.forEach(g => {
+    const canonicalId = `fs_${g.student_id}_${g.tp_id}_${semesterId}_${yearId}`;
     const existingIndex = updated.findIndex(
-      item => item.student_id === g.student_id && 
-              item.tp_id === g.tp_id && 
-              item.semester === semesterId && 
-              item.tahun === yearId
+      item => item.id === canonicalId || (
+        item.student_id === g.student_id && 
+        item.tp_id === g.tp_id && 
+        (item.semester === semesterId || item.semester === 'Ganjil' || item.semester === 'sem-ganjil') && 
+        (item.tahun === yearId || item.tahun === 'th-2025' || item.tahun === '2025/2026')
+      )
     );
 
     const nowIso = new Date().toISOString();
     if (existingIndex > -1) {
-      updated[existingIndex].nilai = g.nilai;
-      updated[existingIndex].updated_at = nowIso;
+      updated[existingIndex] = {
+        ...updated[existingIndex],
+        id: canonicalId,
+        student_id: g.student_id,
+        tp_id: g.tp_id,
+        nilai: g.nilai,
+        semester: semesterId,
+        tahun: yearId,
+        updated_at: nowIso
+      };
     } else {
       updated.push({
-        id: 'fs-' + Date.now() + Math.random().toString(36).substr(2, 4),
+        id: canonicalId,
         student_id: g.student_id,
         tp_id: g.tp_id,
         nilai: g.nilai,
@@ -315,20 +326,31 @@ export function saveSummativeScopeGrades(
   const updated = [...current];
 
   grades.forEach(g => {
+    const canonicalId = `sss_${g.student_id}_${g.lingkup_id}_${semesterId}_${yearId}`;
     const existingIndex = updated.findIndex(
-      item => item.student_id === g.student_id && 
-              item.lingkup_id === g.lingkup_id && 
-              item.semester === semesterId && 
-              item.tahun === yearId
+      item => item.id === canonicalId || (
+        item.student_id === g.student_id && 
+        item.lingkup_id === g.lingkup_id && 
+        (item.semester === semesterId || item.semester === 'Ganjil' || item.semester === 'sem-ganjil') && 
+        (item.tahun === yearId || item.tahun === 'th-2025' || item.tahun === '2025/2026')
+      )
     );
 
     const nowIso = new Date().toISOString();
     if (existingIndex > -1) {
-      updated[existingIndex].nilai = g.nilai;
-      updated[existingIndex].updated_at = nowIso;
+      updated[existingIndex] = {
+        ...updated[existingIndex],
+        id: canonicalId,
+        student_id: g.student_id,
+        lingkup_id: g.lingkup_id,
+        nilai: g.nilai,
+        semester: semesterId,
+        tahun: yearId,
+        updated_at: nowIso
+      };
     } else {
       updated.push({
-        id: 'sss-' + Date.now() + Math.random().toString(36).substr(2, 4),
+        id: canonicalId,
         student_id: g.student_id,
         lingkup_id: g.lingkup_id,
         nilai: g.nilai,
@@ -354,20 +376,31 @@ export function saveSemesterGrades(
   const updated = [...current];
 
   grades.forEach(g => {
+    const canonicalId = `ses_${g.student_id}_${g.subject_id}_${semesterId}_${yearId}`;
     const existingIndex = updated.findIndex(
-      item => item.student_id === g.student_id && 
-              item.subject_id === g.subject_id && 
-              item.semester === semesterId && 
-              item.tahun === yearId
+      item => item.id === canonicalId || (
+        item.student_id === g.student_id && 
+        item.subject_id === g.subject_id && 
+        (item.semester === semesterId || item.semester === 'Ganjil' || item.semester === 'sem-ganjil') && 
+        (item.tahun === yearId || item.tahun === 'th-2025' || item.tahun === '2025/2026')
+      )
     );
 
     const nowIso = new Date().toISOString();
     if (existingIndex > -1) {
-      updated[existingIndex].nilai = g.nilai;
-      updated[existingIndex].updated_at = nowIso;
+      updated[existingIndex] = {
+        ...updated[existingIndex],
+        id: canonicalId,
+        student_id: g.student_id,
+        subject_id: g.subject_id,
+        nilai: g.nilai,
+        semester: semesterId,
+        tahun: yearId,
+        updated_at: nowIso
+      };
     } else {
       updated.push({
-        id: 'ses-' + Date.now() + Math.random().toString(36).substr(2, 4),
+        id: canonicalId,
         student_id: g.student_id,
         subject_id: g.subject_id,
         nilai: g.nilai,

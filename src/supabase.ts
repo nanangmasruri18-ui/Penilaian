@@ -99,19 +99,19 @@ function getItemKey(storeKey: string, item: any): string {
     if (item.student_id && item.tp_id) {
       const sem = item.semester || 'sem-ganjil';
       const yr = item.tahun || 'th-2025';
-      return `${item.student_id}_${item.tp_id}_${sem}_${yr}`;
+      return `fs_${item.student_id}_${item.tp_id}_${sem}_${yr}`;
     }
   } else if (storeKey === 'merdeka_summative_scope_scores') {
     if (item.student_id && item.lingkup_id) {
       const sem = item.semester || 'sem-ganjil';
       const yr = item.tahun || 'th-2025';
-      return `${item.student_id}_${item.lingkup_id}_${sem}_${yr}`;
+      return `sss_${item.student_id}_${item.lingkup_id}_${sem}_${yr}`;
     }
   } else if (storeKey === 'merdeka_semester_scores') {
     if (item.student_id && item.subject_id) {
       const sem = item.semester || 'sem-ganjil';
       const yr = item.tahun || 'th-2025';
-      return `${item.student_id}_${item.subject_id}_${sem}_${yr}`;
+      return `ses_${item.student_id}_${item.subject_id}_${sem}_${yr}`;
     }
   }
   return item.id ? String(item.id) : '';
@@ -121,27 +121,54 @@ function mergeArrays(storeKey: string, local: any[], remote: any[]): any[] {
   if (!Array.isArray(local)) return remote || [];
   if (!Array.isArray(remote)) return local || [];
 
+  const isScoreTable = SCORE_KEYS.includes(storeKey);
   const mergedMap = new Map<string, any>();
   
+  // 1. Process remote items first (authoritative server / peer state)
   remote.forEach(remoteItem => {
-    const k = getItemKey(storeKey, remoteItem);
-    if (k) mergedMap.set(k, remoteItem);
+    if (!remoteItem || typeof remoteItem !== 'object') return;
+    const k = getItemKey(storeKey, remoteItem) || (remoteItem.id ? String(remoteItem.id) : '');
+    if (!k) return;
+
+    const existing = mergedMap.get(k);
+    if (!existing) {
+      mergedMap.set(k, isScoreTable ? { ...remoteItem, id: k } : remoteItem);
+    } else {
+      // Pick newer remote or the one with a non-zero score
+      const existingTime = existing.updated_at ? new Date(existing.updated_at).getTime() : 0;
+      const remoteTime = remoteItem.updated_at ? new Date(remoteItem.updated_at).getTime() : 0;
+      if (remoteTime > existingTime || (existing.nilai === 0 && remoteItem.nilai > 0)) {
+        mergedMap.set(k, isScoreTable ? { ...remoteItem, id: k } : remoteItem);
+      }
+    }
   });
   
+  // 2. Merge local items
   local.forEach(localItem => {
-    const k = getItemKey(storeKey, localItem);
-    if (k) {
-      const remoteItem = mergedMap.get(k);
-      if (!remoteItem) {
-        mergedMap.set(k, localItem);
+    if (!localItem || typeof localItem !== 'object') return;
+    const k = getItemKey(storeKey, localItem) || (localItem.id ? String(localItem.id) : '');
+    if (!k) return;
+
+    const remoteItem = mergedMap.get(k);
+    if (!remoteItem) {
+      mergedMap.set(k, isScoreTable ? { ...localItem, id: k } : localItem);
+    } else {
+      if (isScoreTable) {
+        const localTime = localItem.updated_at ? new Date(localItem.updated_at).getTime() : 0;
+        const remoteTime = remoteItem.updated_at ? new Date(remoteItem.updated_at).getTime() : 0;
+        // Only keep local score if local edit was made strictly newer by > 1.5 seconds AND has valid grade
+        if (localTime > remoteTime + 1500 && localItem.nilai !== undefined && localItem.nilai !== null) {
+          mergedMap.set(k, { ...remoteItem, ...localItem, id: k });
+        } else {
+          // Authoritative remote score wins
+          mergedMap.set(k, { ...localItem, ...remoteItem, id: k });
+        }
       } else {
         const localTime = localItem.updated_at ? new Date(localItem.updated_at).getTime() : 0;
         const remoteTime = remoteItem.updated_at ? new Date(remoteItem.updated_at).getTime() : 0;
-        // If local item is strictly newer, preserve local edits
         if (localTime > remoteTime) {
           mergedMap.set(k, { ...remoteItem, ...localItem });
         } else {
-          // Remote server data is authoritative when timestamps are equal or remote is newer
           mergedMap.set(k, { ...localItem, ...remoteItem });
         }
       }
@@ -185,10 +212,14 @@ async function pushToDedicatedTable(tableName: string, localItems: any[]): Promi
     // 2. Upsert items in batches of 100
     if (localItems.length > 0) {
       for (let i = 0; i < localItems.length; i += 100) {
-        const batch = localItems.slice(i, i + 100).map(item => ({
-          ...item,
-          updated_at: item.updated_at || new Date().toISOString()
-        }));
+        const batch = localItems.slice(i, i + 100).map(item => {
+          const canonicalId = getItemKey(tableName, item) || (item.id ? String(item.id) : '');
+          return {
+            ...item,
+            id: canonicalId || item.id,
+            updated_at: item.updated_at || new Date().toISOString()
+          };
+        });
 
         const { error: upsertError } = await supabase
           .from(tableName)
@@ -410,7 +441,7 @@ export async function queueAutoPush(key: string, data: any): Promise<void> {
   // 1. Immediately broadcast to other open browsers/laptops/phones over WebSocket (0ms delay)
   broadcastTableUpdate(key, data);
 
-  // 2. Debounce the PostgreSQL upsert to Supabase server
+  // 2. Fast debounce (100ms) for PostgreSQL upsert to Supabase server
   if (debounceTimers[key]) {
     clearTimeout(debounceTimers[key]);
   }
@@ -427,7 +458,17 @@ export async function queueAutoPush(key: string, data: any): Promise<void> {
     } catch {
       // Quiet fallback
     }
-  }, 300);
+  }, 100);
+}
+
+// Debounce dispatching merdeka_db_synced so multiple simultaneous row updates batch smoothly
+let syncNotifyTimer: any = null;
+function notifyDbSynced(onSync?: () => void) {
+  if (syncNotifyTimer) clearTimeout(syncNotifyTimer);
+  syncNotifyTimer = setTimeout(() => {
+    window.dispatchEvent(new Event('merdeka_db_synced'));
+    if (onSync) onSync();
+  }, 60);
 }
 
 export function initSupabaseRealtime(onSync?: () => void) {
@@ -454,7 +495,7 @@ export function initSupabaseRealtime(onSync?: () => void) {
           const localRaw = localStorage.getItem(table);
           let finalData = data;
 
-          if (localRaw && SCORE_KEYS.includes(table)) {
+          if (localRaw) {
             try {
               const localParsed = JSON.parse(localRaw);
               if (Array.isArray(localParsed)) {
@@ -466,8 +507,7 @@ export function initSupabaseRealtime(onSync?: () => void) {
           const newRaw = JSON.stringify(finalData);
           if (localRaw !== newRaw) {
             localStorage.setItem(table, newRaw);
-            window.dispatchEvent(new Event('merdeka_db_synced'));
-            if (onSync) onSync();
+            notifyDbSynced(onSync);
           }
         }
       )
@@ -488,33 +528,37 @@ export function initSupabaseRealtime(onSync?: () => void) {
             currentList = [];
           }
 
-          if (payload.eventType === 'INSERT') {
-            const existsIdx = currentList.findIndex(i => String(i.id) === String(payload.new.id));
+          const targetKey = getItemKey(table, payload.new || payload.old);
+
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            const canonicalId = targetKey || (payload.new?.id ? String(payload.new.id) : '');
+            const newRecord = {
+              ...payload.new,
+              id: canonicalId || payload.new?.id
+            };
+            const existsIdx = currentList.findIndex(i => 
+              (canonicalId && (String(i.id) === canonicalId || getItemKey(table, i) === canonicalId)) ||
+              (payload.new?.id && String(i.id) === String(payload.new.id))
+            );
             if (existsIdx >= 0) {
-              currentList[existsIdx] = payload.new;
+              currentList[existsIdx] = { ...currentList[existsIdx], ...newRecord };
             } else {
-              currentList.push(payload.new);
-            }
-          } else if (payload.eventType === 'UPDATE') {
-            const existsIdx = currentList.findIndex(i => String(i.id) === String(payload.new.id));
-            if (existsIdx >= 0) {
-              currentList[existsIdx] = { ...currentList[existsIdx], ...payload.new };
-            } else {
-              currentList.push(payload.new);
+              currentList.push(newRecord);
             }
           } else if (payload.eventType === 'DELETE') {
-            const oldId = payload.old?.id;
-            if (oldId) {
-              currentList = currentList.filter(i => String(i.id) !== String(oldId));
-            }
+            const oldId = payload.old?.id ? String(payload.old.id) : '';
+            currentList = currentList.filter(i => {
+              if (oldId && String(i.id) === oldId) return false;
+              if (targetKey && (String(i.id) === targetKey || getItemKey(table, i) === targetKey)) return false;
+              return true;
+            });
           }
 
           const newRaw = JSON.stringify(currentList);
           // Only trigger state reload if the data actually differs from current local storage!
           if (currentRaw !== newRaw) {
             localStorage.setItem(table, newRaw);
-            window.dispatchEvent(new Event('merdeka_db_synced'));
-            if (onSync) onSync();
+            notifyDbSynced(onSync);
           }
         }
       )
