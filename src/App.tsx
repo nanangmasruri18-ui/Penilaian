@@ -206,7 +206,7 @@ export default function App() {
 
   // Compute stats for Teacher Dashboard (Progress tracker)
   const teacherStats = useMemo(() => {
-    if (!sessionUser || sessionUser.role !== 'Guru') return null;
+    if (!sessionUser || sessionUser.role !== 'Guru' || activeTab !== 'dashboard') return null;
     const teacherObj = getTeacherForUser(sessionUser.id);
     if (!teacherObj) return null;
 
@@ -263,10 +263,11 @@ export default function App() {
       studentsCount: totalTaughtStudents,
       progressList
     };
-  }, [sessionUser, stats]); // recompute when base stats or user changes
+  }, [sessionUser, stats, activeTab]); // recompute when base stats, user, or tab changes
 
   // Compute data for Admin Dashboard: Top 10 students with the highest scores
   const topStudentsData = useMemo(() => {
+    if (!sessionUser || sessionUser.role !== 'Admin' || activeTab !== 'dashboard') return [];
     const students = db.getStudents();
     const classes = db.getClasses();
     const tps = db.getLearningObjectives();
@@ -350,7 +351,7 @@ export default function App() {
     return list
       .sort((a, b) => b.averageGrade - a.averageGrade)
       .slice(0, 10);
-  }, [stats]);
+  }, [sessionUser, stats, activeTab]);
 
   const handleSupabasePush = async () => {
     const confirm = window.confirm('Apakah Anda yakin ingin MENGIRIM seluruh data lokal Anda ke Supabase? Tindakan ini akan menimpa data yang ada di cloud.');
@@ -568,15 +569,7 @@ export default function App() {
 
         {/* MAIN BODY AREA */}
         <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 overflow-y-auto">
-          
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2 }}
-            >
+          <div className="w-full">
               
               {/* ================= TAB 1: DASHBOARD ================= */}
               {activeTab === 'dashboard' && (
@@ -928,8 +921,7 @@ export default function App() {
                 </div>
               )}
 
-            </motion.div>
-          </AnimatePresence>
+          </div>
 
         </main>
       </div>

@@ -832,6 +832,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
 
   // --- Teacher Progress Statistics ---
   const teacherStats = useMemo(() => {
+    if (currentTab !== 'logs') return [];
     const semId = context.semester?.id || 'sem-ganjil';
     const yrId = context.year?.id || 'th-2025';
 
@@ -948,10 +949,11 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
         grandActual
       };
     });
-  }, [teachers, assignments, tps, scopes, formativeScores, summativeScores, semesterScores, students, classes, subjects, context]);
+  }, [currentTab, teachers, assignments, tps, scopes, formativeScores, summativeScores, semesterScores, students, classes, subjects, context]);
 
   // --- Admin Rekapitulasi Ledger Calculator ---
   const rekapLedger = useMemo(() => {
+    if (currentTab !== 'rekap' && currentTab !== 'rekap-admin') return { headers: { tps: [], scopes: [] }, rows: [] };
     if (!activeClassId || !activeSubjectId) return { headers: { tps: [], scopes: [] }, rows: [] };
     
     const semId = context.semester?.id || 'sem-ganjil';
@@ -964,17 +966,38 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     // Get all students in the selected class
     const classStudents = students.filter(s => s.kelas_id === activeClassId);
 
+    // Build O(1) Fast Lookup Maps for instant evaluation
+    const formativeMap = new Map<string, number>();
+    for (let i = 0; i < formativeScores.length; i++) {
+      const fs = formativeScores[i];
+      if (fs.semester === semId && fs.tahun === yrId) {
+        formativeMap.set(`${fs.student_id}_${fs.tp_id}`, fs.nilai);
+      }
+    }
+
+    const summativeMap = new Map<string, number>();
+    for (let i = 0; i < summativeScores.length; i++) {
+      const ss = summativeScores[i];
+      if (ss.semester === semId && ss.tahun === yrId) {
+        summativeMap.set(`${ss.student_id}_${ss.lingkup_id}`, ss.nilai);
+      }
+    }
+
+    const sasMap = new Map<string, number>();
+    for (let i = 0; i < semesterScores.length; i++) {
+      const ses = semesterScores[i];
+      if (ses.subject_id === activeSubjectId && ses.semester === semId && ses.tahun === yrId) {
+        sasMap.set(ses.student_id, ses.nilai);
+      }
+    }
+
     // Populate rows per student
+    const q = searchQuery.toLowerCase();
     const rows = classStudents.map((student, index) => {
       // Find formative scores for each TP
       const studentTpsScores = subjectTps.map(tp => {
-        const fScore = formativeScores.find(
-          s => s.student_id === student.id && 
-               s.tp_id === tp.id && 
-               s.semester === semId && 
-               s.tahun === yrId
-        );
-        return { tpId: tp.id, kode: tp.kode, nilai: fScore ? fScore.nilai : null };
+        const val = formativeMap.get(`${student.id}_${tp.id}`);
+        return { tpId: tp.id, kode: tp.kode, nilai: val !== undefined ? val : null };
       });
 
       // Calculate formative average
@@ -985,13 +1008,8 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
 
       // Find summative scope scores for each scope
       const studentScopeScores = subjectScopes.map(sc => {
-        const sScore = summativeScores.find(
-          s => s.student_id === student.id && 
-               s.lingkup_id === sc.id && 
-               s.semester === semId && 
-               s.tahun === yrId
-        );
-        return { scopeId: sc.id, nama: sc.nama, nilai: sScore ? sScore.nilai : null };
+        const val = summativeMap.get(`${student.id}_${sc.id}`);
+        return { scopeId: sc.id, nama: sc.nama, nilai: val !== undefined ? val : null };
       });
 
       // Calculate summative scope average
@@ -1001,13 +1019,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
         : 0;
 
       // Find Semester Score (SAS)
-      const sasObj = semesterScores.find(
-        s => s.student_id === student.id && 
-             s.subject_id === activeSubjectId && 
-             s.semester === semId && 
-             s.tahun === yrId
-      );
-      const sasScore = sasObj ? sasObj.nilai : null;
+      const sasScore = sasMap.has(student.id) ? sasMap.get(student.id)! : null;
 
       // Final Grade Calculation (Curriculum Merdeka weight standard: 40% Formatif, 40% Sumatif LM, 20% SAS)
       const finalScore = Math.round(
@@ -1028,7 +1040,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
         sasScore,
         finalScore
       };
-    }).filter(row => row.nama.toLowerCase().includes(searchQuery.toLowerCase()) || row.nisn.includes(searchQuery));
+    }).filter(row => !q || row.nama.toLowerCase().includes(q) || row.nisn.includes(q));
 
     return {
       headers: {
@@ -1037,7 +1049,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
       },
       rows
     };
-  }, [activeClassId, activeSubjectId, students, tps, scopes, formativeScores, summativeScores, semesterScores, context, searchQuery]);
+  }, [currentTab, activeClassId, activeSubjectId, students, tps, scopes, formativeScores, summativeScores, semesterScores, context, searchQuery]);
 
   // Excel CSV exporter
   const handleExportExcel = () => {
@@ -2073,7 +2085,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Pilih Kelas</label>
                 <select
                   value={activeClassId}
-                  onChange={(e) => { setActiveClassId(e.target.value); syncState(); }}
+                  onChange={(e) => setActiveClassId(e.target.value)}
                   className="px-3.5 py-2 border border-slate-200 rounded-xl text-slate-700 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 font-medium"
                 >
                   <option value="" disabled>-- Pilih Kelas --</option>
@@ -2087,7 +2099,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Pilih Mata Pelajaran</label>
                 <select
                   value={activeSubjectId}
-                  onChange={(e) => { setActiveSubjectId(e.target.value); syncState(); }}
+                  onChange={(e) => setActiveSubjectId(e.target.value)}
                   className="px-3.5 py-2 border border-slate-200 rounded-xl text-slate-700 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 font-medium"
                 >
                   <option value="" disabled>-- Pilih Mapel --</option>

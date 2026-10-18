@@ -189,12 +189,36 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
   // Set default filters based on assigned classes and subjects
   useEffect(() => {
     if (assigned.classes.length > 0 && !activeClassId) {
-      setActiveClassId(assigned.classes[0].id);
+      const defaultClassId = assigned.classes[0].id;
+      setActiveClassId(defaultClassId);
+      const defaultSubId = activeSubjectId || (assigned.subjects[0]?.id || '');
+      if (defaultSubId) {
+        const matchingTps = tps.filter(tp => tp.class_id === defaultClassId && tp.subject_id === defaultSubId);
+        setActiveTpId(matchingTps[0]?.id || '');
+        const matchingScopes = scopes.filter(sc => sc.class_id === defaultClassId && sc.subject_id === defaultSubId);
+        setActiveScopeId(matchingScopes[0]?.id || '');
+      }
     }
     if (assigned.subjects.length > 0 && !activeSubjectId) {
       setActiveSubjectId(assigned.subjects[0].id);
     }
-  }, [assigned, activeClassId, activeSubjectId]);
+  }, [assigned, activeClassId, activeSubjectId, tps, scopes]);
+
+  const handleClassChange = (newClassId: string) => {
+    setActiveClassId(newClassId);
+    const newTps = tps.filter(tp => tp.class_id === newClassId && tp.subject_id === activeSubjectId);
+    setActiveTpId(newTps[0]?.id || '');
+    const newScopes = scopes.filter(sc => sc.class_id === newClassId && sc.subject_id === activeSubjectId);
+    setActiveScopeId(newScopes[0]?.id || '');
+  };
+
+  const handleSubjectChange = (newSubjectId: string) => {
+    setActiveSubjectId(newSubjectId);
+    const newTps = tps.filter(tp => tp.class_id === activeClassId && tp.subject_id === newSubjectId);
+    setActiveTpId(newTps[0]?.id || '');
+    const newScopes = scopes.filter(sc => sc.class_id === activeClassId && sc.subject_id === newSubjectId);
+    setActiveScopeId(newScopes[0]?.id || '');
+  };
 
   // Filter students based on active class
   const filteredStudents = useMemo(() => {
@@ -590,6 +614,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
 
   // --- Rekapitulasi Ledger Calculator ---
   const rekapLedger = useMemo(() => {
+    if (currentTab !== 'rekap') return { headers: { tps: [], scopes: [] }, rows: [] };
     if (!activeClassId || !activeSubjectId) return { headers: { tps: [], scopes: [] }, rows: [] };
     
     const semId = context.semester?.id || 'sem-ganjil';
@@ -599,17 +624,38 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     const subjectTps = tps.filter(t => t.class_id === activeClassId && t.subject_id === activeSubjectId);
     const subjectScopes = scopes.filter(sc => sc.class_id === activeClassId && sc.subject_id === activeSubjectId);
 
+    // Build O(1) Fast Lookup Maps
+    const formativeMap = new Map<string, number>();
+    for (let i = 0; i < formativeScores.length; i++) {
+      const fs = formativeScores[i];
+      if (fs.semester === semId && fs.tahun === yrId) {
+        formativeMap.set(`${fs.student_id}_${fs.tp_id}`, fs.nilai);
+      }
+    }
+
+    const summativeMap = new Map<string, number>();
+    for (let i = 0; i < summativeScores.length; i++) {
+      const ss = summativeScores[i];
+      if (ss.semester === semId && ss.tahun === yrId) {
+        summativeMap.set(`${ss.student_id}_${ss.lingkup_id}`, ss.nilai);
+      }
+    }
+
+    const sasMap = new Map<string, number>();
+    for (let i = 0; i < semesterScores.length; i++) {
+      const ses = semesterScores[i];
+      if (ses.subject_id === activeSubjectId && ses.semester === semId && ses.tahun === yrId) {
+        sasMap.set(ses.student_id, ses.nilai);
+      }
+    }
+
+    const q = searchQuery.toLowerCase();
     // Populate rows per student
     const rows = filteredStudents.map((student, index) => {
       // Find formative scores for each TP
       const studentTpsScores = subjectTps.map(tp => {
-        const fScore = formativeScores.find(
-          s => s.student_id === student.id && 
-               s.tp_id === tp.id && 
-               s.semester === semId && 
-               s.tahun === yrId
-        );
-        return { tpId: tp.id, kode: tp.kode, nilai: fScore ? fScore.nilai : null };
+        const val = formativeMap.get(`${student.id}_${tp.id}`);
+        return { tpId: tp.id, kode: tp.kode, nilai: val !== undefined ? val : null };
       });
 
       // Calculate formative average
@@ -620,13 +666,8 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
 
       // Find summative scope scores for each scope
       const studentScopeScores = subjectScopes.map(sc => {
-        const sScore = summativeScores.find(
-          s => s.student_id === student.id && 
-               s.lingkup_id === sc.id && 
-               s.semester === semId && 
-               s.tahun === yrId
-        );
-        return { scopeId: sc.id, nama: sc.nama, nilai: sScore ? sScore.nilai : null };
+        const val = summativeMap.get(`${student.id}_${sc.id}`);
+        return { scopeId: sc.id, nama: sc.nama, nilai: val !== undefined ? val : null };
       });
 
       // Calculate summative scope average
@@ -636,13 +677,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
         : 0;
 
       // Find Semester Score (SAS)
-      const sasObj = semesterScores.find(
-        s => s.student_id === student.id && 
-             s.subject_id === activeSubjectId && 
-             s.semester === semId && 
-             s.tahun === yrId
-      );
-      const sasScore = sasObj ? sasObj.nilai : null;
+      const sasScore = sasMap.has(student.id) ? sasMap.get(student.id)! : null;
 
       // Final Grade Calculation (Curriculum Merdeka weight standard: 40% Formatif, 40% Sumatif LM, 20% SAS)
       const finalScore = Math.round(
@@ -663,7 +698,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
         sasScore,
         finalScore
       };
-    }).filter(row => row.nama.toLowerCase().includes(searchQuery.toLowerCase()) || row.nisn.includes(searchQuery));
+    }).filter(row => !q || row.nama.toLowerCase().includes(q) || row.nisn.includes(q));
 
     return {
       headers: {
@@ -672,7 +707,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
       },
       rows
     };
-  }, [activeClassId, activeSubjectId, students, tps, scopes, formativeScores, summativeScores, semesterScores, context, searchQuery]);
+  }, [currentTab, activeClassId, activeSubjectId, filteredStudents, tps, scopes, formativeScores, summativeScores, semesterScores, context, searchQuery]);
 
   // Excel CSV exporter
   const handleExportExcel = () => {
@@ -757,7 +792,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
               <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Kelas Diampu</label>
               <select
                 value={activeClassId}
-                onChange={(e) => { setActiveClassId(e.target.value); syncState(); }}
+                onChange={(e) => handleClassChange(e.target.value)}
                 className="px-3.5 py-2 border border-slate-200 rounded-xl text-slate-700 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500"
               >
                 {assigned.classes.map(c => (
@@ -770,7 +805,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
               <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Mapel Diampu</label>
               <select
                 value={activeSubjectId}
-                onChange={(e) => { setActiveSubjectId(e.target.value); syncState(); }}
+                onChange={(e) => handleSubjectChange(e.target.value)}
                 className="px-3.5 py-2 border border-slate-200 rounded-xl text-slate-700 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500"
               >
                 {assigned.subjects.map(s => (
