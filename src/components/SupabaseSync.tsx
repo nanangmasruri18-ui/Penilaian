@@ -565,7 +565,7 @@ end $$;`;
               `}>
                 <span className={`w-2 h-2 rounded-full 
                   ${syncStatus.status === 'success' ? 'bg-emerald-500' : 
-                    syncStatus.status === 'syncing' ? 'bg-indigo-500 animate-pulse' : 
+                    syncStatus.status === 'syncing' ? 'bg-indigo-500' : 
                     syncStatus.status === 'error' ? 'bg-rose-500' : 
                     'bg-slate-400'}
                 `} />
@@ -575,7 +575,7 @@ end $$;`;
               </span>
 
               <span className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold font-mono bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-100/50 dark:border-indigo-900/50">
-                <Radio className="w-3 h-3 text-emerald-500 animate-pulse" />
+                <Radio className="w-3 h-3 text-emerald-500" />
                 Live Sync
               </span>
             </div>
@@ -650,7 +650,7 @@ end $$;`;
 
       {/* 2. CONNECTION TEST NOTIFICATION */}
       {testMessage && (
-        <div className={`p-4 rounded-xl border text-xs flex gap-3 items-start animate-fadeIn
+        <div className={`p-4 rounded-xl border text-xs flex gap-3 items-start
           ${testStatus === 'success' ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-100 dark:border-emerald-900/30 text-emerald-800 dark:text-emerald-300' : 
             'bg-amber-50 dark:bg-amber-950/20 border-amber-100 dark:border-amber-900/30 text-amber-800 dark:text-amber-300'}
         `}>

@@ -4,7 +4,7 @@ import {
   SemesterScore, AcademicYear, Semester, AuditLog 
 } from './types';
 import * as seed from './seed';
-import { queueAutoPush } from './supabase';
+import { queueAutoPush, pushScoresDirectly, normalizeSemester, normalizeYear } from './supabase';
 
 
 // Storage keys
@@ -274,45 +274,45 @@ export function saveFormativeGrades(
 ) {
   const current = db.getFormativeScores();
   const updated = [...current];
+  const sem = normalizeSemester(semesterId);
+  const yr = normalizeYear(yearId);
+  const nowIso = new Date().toISOString();
+  const modifiedItems: FormativeScore[] = [];
 
   grades.forEach(g => {
-    const canonicalId = `fs_${g.student_id}_${g.tp_id}_${semesterId}_${yearId}`;
+    const canonicalId = `fs_${g.student_id}_${g.tp_id}_${sem}_${yr}`;
     const existingIndex = updated.findIndex(
       item => item.id === canonicalId || (
         item.student_id === g.student_id && 
         item.tp_id === g.tp_id && 
-        (item.semester === semesterId || item.semester === 'Ganjil' || item.semester === 'sem-ganjil') && 
-        (item.tahun === yearId || item.tahun === 'th-2025' || item.tahun === '2025/2026')
+        normalizeSemester(item.semester) === sem &&
+        normalizeYear(item.tahun) === yr
       )
     );
 
-    const nowIso = new Date().toISOString();
+    const record: FormativeScore = {
+      id: canonicalId,
+      student_id: g.student_id,
+      tp_id: g.tp_id,
+      nilai: g.nilai,
+      semester: sem,
+      tahun: yr,
+      updated_at: nowIso
+    };
+
     if (existingIndex > -1) {
-      updated[existingIndex] = {
-        ...updated[existingIndex],
-        id: canonicalId,
-        student_id: g.student_id,
-        tp_id: g.tp_id,
-        nilai: g.nilai,
-        semester: semesterId,
-        tahun: yearId,
-        updated_at: nowIso
-      };
+      updated[existingIndex] = { ...updated[existingIndex], ...record };
     } else {
-      updated.push({
-        id: canonicalId,
-        student_id: g.student_id,
-        tp_id: g.tp_id,
-        nilai: g.nilai,
-        semester: semesterId,
-        tahun: yearId,
-        updated_at: nowIso
-      });
+      updated.push(record);
     }
+    modifiedItems.push(record);
   });
 
   db.setFormativeScores(updated);
+  // Direct instant push to Supabase PostgreSQL (<200ms) and WebSocket broadcast
+  pushScoresDirectly(KEYS.FORMATIVE_SCORES, modifiedItems);
   logAudit(editorName, `Mengubah ${grades.length} nilai formatif.`);
+  return modifiedItems;
 }
 
 // Summative Scope Grade Management
@@ -324,45 +324,45 @@ export function saveSummativeScopeGrades(
 ) {
   const current = db.getSummativeScopeScores();
   const updated = [...current];
+  const sem = normalizeSemester(semesterId);
+  const yr = normalizeYear(yearId);
+  const nowIso = new Date().toISOString();
+  const modifiedItems: SummativeScopeScore[] = [];
 
   grades.forEach(g => {
-    const canonicalId = `sss_${g.student_id}_${g.lingkup_id}_${semesterId}_${yearId}`;
+    const canonicalId = `sss_${g.student_id}_${g.lingkup_id}_${sem}_${yr}`;
     const existingIndex = updated.findIndex(
       item => item.id === canonicalId || (
         item.student_id === g.student_id && 
         item.lingkup_id === g.lingkup_id && 
-        (item.semester === semesterId || item.semester === 'Ganjil' || item.semester === 'sem-ganjil') && 
-        (item.tahun === yearId || item.tahun === 'th-2025' || item.tahun === '2025/2026')
+        normalizeSemester(item.semester) === sem &&
+        normalizeYear(item.tahun) === yr
       )
     );
 
-    const nowIso = new Date().toISOString();
+    const record: SummativeScopeScore = {
+      id: canonicalId,
+      student_id: g.student_id,
+      lingkup_id: g.lingkup_id,
+      nilai: g.nilai,
+      semester: sem,
+      tahun: yr,
+      updated_at: nowIso
+    };
+
     if (existingIndex > -1) {
-      updated[existingIndex] = {
-        ...updated[existingIndex],
-        id: canonicalId,
-        student_id: g.student_id,
-        lingkup_id: g.lingkup_id,
-        nilai: g.nilai,
-        semester: semesterId,
-        tahun: yearId,
-        updated_at: nowIso
-      };
+      updated[existingIndex] = { ...updated[existingIndex], ...record };
     } else {
-      updated.push({
-        id: canonicalId,
-        student_id: g.student_id,
-        lingkup_id: g.lingkup_id,
-        nilai: g.nilai,
-        semester: semesterId,
-        tahun: yearId,
-        updated_at: nowIso
-      });
+      updated.push(record);
     }
+    modifiedItems.push(record);
   });
 
   db.setSummativeScopeScores(updated);
+  // Direct instant push to Supabase PostgreSQL (<200ms) and WebSocket broadcast
+  pushScoresDirectly(KEYS.SUMMATIVE_SCOPE_SCORES, modifiedItems);
   logAudit(editorName, `Mengubah ${grades.length} nilai sumatif lingkup materi.`);
+  return modifiedItems;
 }
 
 // Semester Score (SAS) Management
@@ -374,43 +374,43 @@ export function saveSemesterGrades(
 ) {
   const current = db.getSemesterScores();
   const updated = [...current];
+  const sem = normalizeSemester(semesterId);
+  const yr = normalizeYear(yearId);
+  const nowIso = new Date().toISOString();
+  const modifiedItems: SemesterScore[] = [];
 
   grades.forEach(g => {
-    const canonicalId = `ses_${g.student_id}_${g.subject_id}_${semesterId}_${yearId}`;
+    const canonicalId = `ses_${g.student_id}_${g.subject_id}_${sem}_${yr}`;
     const existingIndex = updated.findIndex(
       item => item.id === canonicalId || (
         item.student_id === g.student_id && 
         item.subject_id === g.subject_id && 
-        (item.semester === semesterId || item.semester === 'Ganjil' || item.semester === 'sem-ganjil') && 
-        (item.tahun === yearId || item.tahun === 'th-2025' || item.tahun === '2025/2026')
+        normalizeSemester(item.semester) === sem &&
+        normalizeYear(item.tahun) === yr
       )
     );
 
-    const nowIso = new Date().toISOString();
+    const record: SemesterScore = {
+      id: canonicalId,
+      student_id: g.student_id,
+      subject_id: g.subject_id,
+      nilai: g.nilai,
+      semester: sem,
+      tahun: yr,
+      updated_at: nowIso
+    };
+
     if (existingIndex > -1) {
-      updated[existingIndex] = {
-        ...updated[existingIndex],
-        id: canonicalId,
-        student_id: g.student_id,
-        subject_id: g.subject_id,
-        nilai: g.nilai,
-        semester: semesterId,
-        tahun: yearId,
-        updated_at: nowIso
-      };
+      updated[existingIndex] = { ...updated[existingIndex], ...record };
     } else {
-      updated.push({
-        id: canonicalId,
-        student_id: g.student_id,
-        subject_id: g.subject_id,
-        nilai: g.nilai,
-        semester: semesterId,
-        tahun: yearId,
-        updated_at: nowIso
-      });
+      updated.push(record);
     }
+    modifiedItems.push(record);
   });
 
   db.setSemesterScores(updated);
+  // Direct instant push to Supabase PostgreSQL (<200ms) and WebSocket broadcast
+  pushScoresDirectly(KEYS.SEMESTER_SCORES, modifiedItems);
   logAudit(editorName, `Mengubah ${grades.length} nilai sumatif akhir semester.`);
+  return modifiedItems;
 }

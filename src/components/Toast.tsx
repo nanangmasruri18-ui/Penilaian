@@ -1,6 +1,5 @@
 import React, { useEffect } from 'react';
 import { CheckCircle2, AlertCircle, X, Info } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
 
 export type ToastType = 'success' | 'error' | 'info';
 
@@ -19,11 +18,9 @@ interface ToastContainerProps {
 export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onRemove }) => {
   return (
     <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full no-print">
-      <AnimatePresence>
-        {toasts.map((toast) => (
-          <ToastItem key={toast.id} toast={toast} onRemove={onRemove} />
-        ))}
-      </AnimatePresence>
+      {toasts.map((toast) => (
+        <ToastItem key={toast.id} toast={toast} onRemove={onRemove} />
+      ))}
     </div>
   );
 };
@@ -54,11 +51,8 @@ const ToastItem: React.FC<ToastItemProps> = ({ toast, onRemove }) => {
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -20, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.15 } }}
-      className={`flex items-start gap-3 p-4 rounded-xl border shadow-lg ${bgColors[toast.type]} transition-shadow`}
+    <div
+      className={`flex items-start gap-3 p-4 rounded-xl border shadow-lg ${bgColors[toast.type]} transition-all duration-150`}
     >
       {icons[toast.type]}
       <div className="flex-1 min-w-0">
@@ -67,10 +61,10 @@ const ToastItem: React.FC<ToastItemProps> = ({ toast, onRemove }) => {
       </div>
       <button 
         onClick={() => onRemove(toast.id)}
-        className="text-slate-400 hover:text-slate-600 transition-colors p-0.5 rounded-lg hover:bg-slate-50 flex-shrink-0"
+        className="text-slate-400 hover:text-slate-600 transition-colors p-0.5 rounded-lg hover:bg-slate-50 flex-shrink-0 cursor-pointer"
       >
         <X className="w-4 h-4" />
       </button>
-    </motion.div>
+    </div>
   );
 };

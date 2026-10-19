@@ -21,7 +21,6 @@ import {
   Sliders, User, Shield, Info, Database, AlertTriangle, ArrowRight, CheckCircle, Flame,
   Sparkles, FileText, Trophy, Award, Radio
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
   const [sessionUser, setSessionUser] = useState<Profile | null>(null);

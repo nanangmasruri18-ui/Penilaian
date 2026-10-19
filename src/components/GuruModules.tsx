@@ -1044,7 +1044,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
             {activeTpId && (
               <div className="flex items-center gap-3">
                 {hasUnsavedChanges ? (
-                  <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-50 border border-amber-200 text-amber-700 flex items-center gap-1.5 animate-pulse">
+                  <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-50 border border-amber-200 text-amber-700 flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                     Ada Perubahan Belum Disimpan
                   </span>
@@ -1171,7 +1171,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
             {activeScopeId && (
               <div className="flex items-center gap-3">
                 {hasUnsavedChanges ? (
-                  <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-50 border border-amber-200 text-amber-700 flex items-center gap-1.5 animate-pulse">
+                  <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-50 border border-amber-200 text-amber-700 flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                     Ada Perubahan Belum Disimpan
                   </span>
@@ -1298,7 +1298,7 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
             {activeSubjectId && (
               <div className="flex items-center gap-3">
                 {hasUnsavedChanges ? (
-                  <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-50 border border-amber-200 text-amber-700 flex items-center gap-1.5 animate-pulse">
+                  <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-50 border border-amber-200 text-amber-700 flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                     Ada Perubahan Belum Disimpan
                   </span>

@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { db, logAudit } from '../db';
 import { Profile } from '../types';
 import { GraduationCap, Lock, Mail, ChevronRight, Eye, EyeOff } from 'lucide-react';
-import { motion } from 'motion/react';
 
 interface LoginProps {
   onLoginSuccess: (profile: Profile) => void;
@@ -71,41 +70,21 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, addToast }) => {
       <div className="max-w-md w-full space-y-8">
         {/* Brand Header */}
         <div className="text-center">
-          <motion.div 
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.5, ease: 'easeOut' }}
-            className="mx-auto h-16 w-16 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-xl shadow-indigo-100 mb-6"
-          >
+          <div className="mx-auto h-16 w-16 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-xl shadow-indigo-100 mb-6">
             <GraduationCap className="h-9 w-9 text-white" />
-          </motion.div>
+          </div>
           
-          <motion.h2 
-            initial={{ y: -10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.1, duration: 0.4 }}
-            className="text-3xl font-bold text-slate-900 tracking-tight font-display"
-          >
+          <h2 className="text-3xl font-bold text-slate-900 tracking-tight font-display">
             Sistem Penilaian SD
-          </motion.h2>
+          </h2>
           
-          <motion.p 
-            initial={{ y: -10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.2, duration: 0.4 }}
-            className="mt-2 text-sm text-slate-500"
-          >
+          <p className="mt-2 text-sm text-slate-500">
             Kurikulum Merdeka • Portal Guru & Administrator
-          </motion.p>
+          </p>
         </div>
 
         {/* Login Card */}
-        <motion.div 
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.3, duration: 0.5 }}
-          className="bg-white p-8 rounded-2xl border border-slate-100 shadow-xl shadow-slate-100/50"
-        >
+        <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-xl shadow-slate-100/50">
           <form className="space-y-6" onSubmit={handleSubmit}>
             <div>
               <label htmlFor="email" className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
@@ -194,7 +173,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, addToast }) => {
               </button>
             </div>
           </div>
-        </motion.div>
+        </div>
       </div>
     </div>
   );

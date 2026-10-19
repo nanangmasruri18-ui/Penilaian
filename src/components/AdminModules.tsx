@@ -167,7 +167,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     onRefreshStats();
   };
 
-  // Auto-sync when switching tabs or receiving realtime event
+  // Auto-sync when switching tabs, changing class/subject, or receiving realtime event
   useEffect(() => {
     syncState();
     if (currentTab === 'rekap' || currentTab === 'logs') {
@@ -175,7 +175,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
         syncState();
       });
     }
-  }, [currentTab]);
+  }, [currentTab, activeClassId, activeSubjectId]);
 
   useEffect(() => {
     const handleDbSynced = () => {
@@ -989,7 +989,7 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     if (!activeClassId || !activeSubjectId) return { headers: { tps: [], scopes: [] }, rows: [] };
     
     const semId = context.semester?.id || 'sem-ganjil';
-    const yrId = context.year?.id || 'th-2025';
+    const yrId = context.year?.id || 'th-1784091890382';
 
     // Find all TPs and Scopes for active class + subject
     const subjectTps = tps.filter(t => t.class_id === activeClassId && t.subject_id === activeSubjectId);
@@ -1008,32 +1008,49 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
       const matchYr = !itemYr || 
                       itemYr === yrId || 
                       itemYr === context.year?.nama || 
-                      (yrId.includes('2025') && itemYr.includes('2025'));
+                      (context.year?.nama && itemYr.includes(context.year.nama.substring(0, 4))) ||
+                      (yrId.includes('178409') && (itemYr.includes('178409') || itemYr.includes('2026') || itemYr.includes('2025'))) ||
+                      (yrId.includes('2025') && (itemYr.includes('2025') || itemYr.includes('178409')));
       return matchSem && matchYr;
     };
 
-    // Build O(1) Fast Lookup Maps for instant evaluation
-    const formativeMap = new Map<string, number>();
+    // Build O(1) Fast Lookup Maps with timestamp prioritization (newest teacher edits always win)
+    const formativeMap = new Map<string, { val: number; updatedAt: number }>();
     for (let i = 0; i < formativeScores.length; i++) {
       const fs = formativeScores[i];
       if (isMatchingContext(fs.semester, fs.tahun)) {
-        formativeMap.set(`${fs.student_id}_${fs.tp_id}`, fs.nilai);
+        const key = `${fs.student_id}_${fs.tp_id}`;
+        const time = fs.updated_at ? new Date(fs.updated_at).getTime() : 0;
+        const cur = formativeMap.get(key);
+        if (!cur || time >= cur.updatedAt || (cur.val === 0 && fs.nilai > 0)) {
+          formativeMap.set(key, { val: fs.nilai, updatedAt: time });
+        }
       }
     }
 
-    const summativeMap = new Map<string, number>();
+    const summativeMap = new Map<string, { val: number; updatedAt: number }>();
     for (let i = 0; i < summativeScores.length; i++) {
       const ss = summativeScores[i];
       if (isMatchingContext(ss.semester, ss.tahun)) {
-        summativeMap.set(`${ss.student_id}_${ss.lingkup_id}`, ss.nilai);
+        const key = `${ss.student_id}_${ss.lingkup_id}`;
+        const time = ss.updated_at ? new Date(ss.updated_at).getTime() : 0;
+        const cur = summativeMap.get(key);
+        if (!cur || time >= cur.updatedAt || (cur.val === 0 && ss.nilai > 0)) {
+          summativeMap.set(key, { val: ss.nilai, updatedAt: time });
+        }
       }
     }
 
-    const sasMap = new Map<string, number>();
+    const sasMap = new Map<string, { val: number; updatedAt: number }>();
     for (let i = 0; i < semesterScores.length; i++) {
       const ses = semesterScores[i];
       if (ses.subject_id === activeSubjectId && isMatchingContext(ses.semester, ses.tahun)) {
-        sasMap.set(ses.student_id, ses.nilai);
+        const key = ses.student_id;
+        const time = ses.updated_at ? new Date(ses.updated_at).getTime() : 0;
+        const cur = sasMap.get(key);
+        if (!cur || time >= cur.updatedAt || (cur.val === 0 && ses.nilai > 0)) {
+          sasMap.set(key, { val: ses.nilai, updatedAt: time });
+        }
       }
     }
 
@@ -1042,8 +1059,9 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     const rows = classStudents.map((student, index) => {
       // Find formative scores for each TP
       const studentTpsScores = subjectTps.map(tp => {
-        const val = formativeMap.get(`${student.id}_${tp.id}`);
-        return { tpId: tp.id, kode: tp.kode, nilai: val !== undefined ? val : null };
+        const entry = formativeMap.get(`${student.id}_${tp.id}`);
+        const val = entry !== undefined ? entry.val : null;
+        return { tpId: tp.id, kode: tp.kode, nilai: val !== null && val !== undefined ? val : null };
       });
 
       // Calculate formative average
@@ -1054,8 +1072,9 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
 
       // Find summative scope scores for each scope
       const studentScopeScores = subjectScopes.map(sc => {
-        const val = summativeMap.get(`${student.id}_${sc.id}`);
-        return { scopeId: sc.id, nama: sc.nama, nilai: val !== undefined ? val : null };
+        const entry = summativeMap.get(`${student.id}_${sc.id}`);
+        const val = entry !== undefined ? entry.val : null;
+        return { scopeId: sc.id, nama: sc.nama, nilai: val !== null && val !== undefined ? val : null };
       });
 
       // Calculate summative scope average
@@ -1065,7 +1084,8 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
         : 0;
 
       // Find Semester Score (SAS)
-      const sasScore = sasMap.has(student.id) ? sasMap.get(student.id)! : null;
+      const sasEntry = sasMap.get(student.id);
+      const sasScore = sasEntry !== undefined ? sasEntry.val : null;
 
       // Final Grade Calculation (Curriculum Merdeka weight standard: 40% Formatif, 40% Sumatif LM, 20% SAS)
       const finalScore = Math.round(
@@ -2153,6 +2173,14 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
                     <option key={s.id} value={s.id}>{s.nama}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Periode Aktif</label>
+                <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-indigo-700 flex items-center gap-1.5 h-[38px]">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+                  <span className="truncate">{context.year?.nama || '2026/2027'} • Sem. {context.semester?.nama || 'Ganjil'}</span>
+                </div>
               </div>
             </div>
 

@@ -93,24 +93,39 @@ export const MASTER_TABLES = [
   'merdeka_material_scopes'
 ];
 
-function getItemKey(storeKey: string, item: any): string {
+export function normalizeSemester(sem?: string): string {
+  if (!sem) return 'sem-ganjil';
+  const s = String(sem).toLowerCase();
+  if (s.includes('genap') || s === '2') return 'sem-genap';
+  return 'sem-ganjil';
+}
+
+export function normalizeYear(yr?: string): string {
+  if (!yr) return 'th-1784091890382';
+  const y = String(yr);
+  if (y.includes('2025') && !y.includes('2026')) return 'th-2025';
+  if (y.includes('178409') || y.includes('2026')) return 'th-1784091890382';
+  return y;
+}
+
+export function getItemKey(storeKey: string, item: any): string {
   if (!item || typeof item !== 'object') return '';
   if (storeKey === 'merdeka_formative_scores') {
     if (item.student_id && item.tp_id) {
-      const sem = item.semester || 'sem-ganjil';
-      const yr = item.tahun || 'th-2025';
+      const sem = normalizeSemester(item.semester);
+      const yr = normalizeYear(item.tahun);
       return `fs_${item.student_id}_${item.tp_id}_${sem}_${yr}`;
     }
   } else if (storeKey === 'merdeka_summative_scope_scores') {
     if (item.student_id && item.lingkup_id) {
-      const sem = item.semester || 'sem-ganjil';
-      const yr = item.tahun || 'th-2025';
+      const sem = normalizeSemester(item.semester);
+      const yr = normalizeYear(item.tahun);
       return `sss_${item.student_id}_${item.lingkup_id}_${sem}_${yr}`;
     }
   } else if (storeKey === 'merdeka_semester_scores') {
     if (item.student_id && item.subject_id) {
-      const sem = item.semester || 'sem-ganjil';
-      const yr = item.tahun || 'th-2025';
+      const sem = normalizeSemester(item.semester);
+      const yr = normalizeYear(item.tahun);
       return `ses_${item.student_id}_${item.subject_id}_${sem}_${yr}`;
     }
   }
@@ -137,7 +152,7 @@ function mergeArrays(storeKey: string, local: any[], remote: any[]): any[] {
       // Pick newer remote or the one with a non-zero score
       const existingTime = existing.updated_at ? new Date(existing.updated_at).getTime() : 0;
       const remoteTime = remoteItem.updated_at ? new Date(remoteItem.updated_at).getTime() : 0;
-      if (remoteTime > existingTime || (existing.nilai === 0 && remoteItem.nilai > 0)) {
+      if (remoteTime >= existingTime || (existing.nilai === 0 && remoteItem.nilai > 0)) {
         mergedMap.set(k, isScoreTable ? { ...remoteItem, id: k } : remoteItem);
       }
     }
@@ -156,8 +171,8 @@ function mergeArrays(storeKey: string, local: any[], remote: any[]): any[] {
       if (isScoreTable) {
         const localTime = localItem.updated_at ? new Date(localItem.updated_at).getTime() : 0;
         const remoteTime = remoteItem.updated_at ? new Date(remoteItem.updated_at).getTime() : 0;
-        // Only keep local score if local edit was made strictly newer by > 1.5 seconds AND has valid grade
-        if (localTime > remoteTime + 1500 && localItem.nilai !== undefined && localItem.nilai !== null) {
+        // Keep local if local edit is strictly newer AND has a valid grade
+        if (localTime > remoteTime && localItem.nilai !== undefined && localItem.nilai !== null) {
           mergedMap.set(k, { ...remoteItem, ...localItem, id: k });
         } else {
           // Authoritative remote score wins
@@ -182,6 +197,47 @@ function mergeArrays(storeKey: string, local: any[], remote: any[]): any[] {
 const tableWarningSilenced = new Set<string>();
 
 /**
+ * Direct push for specific modified score items (e.g. 10-40 scores edited by a teacher).
+ * Saves to Supabase in a single atomic network request (< 200ms) and broadcasts in real-time.
+ */
+export async function pushScoresDirectly(tableName: string, items: any[]): Promise<boolean> {
+  if (!items || !Array.isArray(items) || items.length === 0) return true;
+  try {
+    const canonicalItems = items.map(item => {
+      const canonicalId = getItemKey(tableName, item) || (item.id ? String(item.id) : '');
+      return {
+        ...item,
+        id: canonicalId || item.id,
+        updated_at: item.updated_at || new Date().toISOString()
+      };
+    });
+
+    // 1. Immediately broadcast over Supabase WebSockets to all other open browsers/devices (0ms delay)
+    broadcastTableUpdate(tableName, canonicalItems);
+
+    // 2. Direct atomic upsert to Supabase PostgreSQL table
+    const { error } = await supabase
+      .from(tableName)
+      .upsert(canonicalItems, { onConflict: 'id' });
+
+    if (error) {
+      console.warn(`[Supabase Direct Push Error] ${tableName}:`, error.message);
+      return false;
+    }
+
+    setSyncStatus({
+      status: 'success',
+      lastSync: new Date().toISOString(),
+      errorMessage: null
+    });
+    return true;
+  } catch (err: any) {
+    console.warn(`[Supabase Direct Push Exception] ${tableName}:`, err);
+    return false;
+  }
+}
+
+/**
  * Push data into a dedicated separate relational table in Supabase.
  */
 async function pushToDedicatedTable(tableName: string, localItems: any[]): Promise<boolean> {
@@ -201,18 +257,26 @@ async function pushToDedicatedTable(tableName: string, localItems: any[]): Promi
           .filter(id => !localIdSet.has(id));
 
         if (idsToDelete.length > 0) {
-          for (let i = 0; i < idsToDelete.length; i += 100) {
-            const batch = idsToDelete.slice(i, i + 100);
+          for (let i = 0; i < idsToDelete.length; i += 200) {
+            const batch = idsToDelete.slice(i, i + 200);
             await supabase.from(tableName).delete().in('id', batch);
           }
         }
       }
     }
 
-    // 2. Upsert items in batches of 100
+    // 2. Upsert items: sort with recently modified items first so priority changes are saved immediately
     if (localItems.length > 0) {
-      for (let i = 0; i < localItems.length; i += 100) {
-        const batch = localItems.slice(i, i + 100).map(item => {
+      const sortedItems = [...localItems].sort((a, b) => {
+        const tA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const tB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        return tB - tA;
+      });
+
+      // Batch size 500 for maximum throughput
+      const batchSize = 500;
+      for (let i = 0; i < sortedItems.length; i += batchSize) {
+        const batch = sortedItems.slice(i, i + batchSize).map(item => {
           const canonicalId = getItemKey(tableName, item) || (item.id ? String(item.id) : '');
           return {
             ...item,
