@@ -5,7 +5,8 @@ import {
 import { 
   Profile, Teacher, Class, Subject, Student, TeacherAssignment, 
   AcademicYear, Semester, LearningObjective, MaterialScope,
-  FormativeScore, SummativeScopeScore, SemesterScore
+  FormativeScore, SummativeScopeScore, SemesterScore,
+  sortTps, sortScopes, sortStudents
 } from '../types';
 import { pullFromSupabase } from '../supabase';
 import { Modal } from './Modal';
@@ -837,11 +838,12 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
   }, [teachers, profiles, searchQuery]);
 
   const filteredStudents = useMemo(() => {
-    return students.filter(s => {
+    const list = students.filter(s => {
       const matchSearch = s.nama.toLowerCase().includes(searchQuery.toLowerCase()) || s.nisn.includes(searchQuery);
       const matchClass = filterClass === 'all' || s.kelas_id === filterClass;
       return matchSearch && matchClass;
     });
+    return sortStudents(list);
   }, [students, searchQuery, filterClass]);
 
   const filteredClasses = useMemo(() => {
@@ -991,12 +993,12 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     const semId = context.semester?.id || 'sem-ganjil';
     const yrId = context.year?.id || 'th-1784091890382';
 
-    // Find all TPs and Scopes for active class + subject
-    const subjectTps = tps.filter(t => t.class_id === activeClassId && t.subject_id === activeSubjectId);
-    const subjectScopes = scopes.filter(sc => sc.class_id === activeClassId && sc.subject_id === activeSubjectId);
+    // Find all TPs and Scopes for active class + subject, sorted numerically (TP 1, TP 2, ... LM 1, LM 2, ...)
+    const subjectTps = sortTps(tps.filter(t => t.class_id === activeClassId && t.subject_id === activeSubjectId));
+    const subjectScopes = sortScopes(scopes.filter(sc => sc.class_id === activeClassId && sc.subject_id === activeSubjectId));
 
-    // Get all students in the selected class
-    const classStudents = students.filter(s => s.kelas_id === activeClassId);
+    // Get all students in the selected class, sorted alphabetically (A-Z)
+    const classStudents = sortStudents(students.filter(s => s.kelas_id === activeClassId));
 
     // Helper to match semester & academic year across different naming conventions
     const isMatchingContext = (itemSem?: string, itemYr?: string) => {

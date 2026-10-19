@@ -103,3 +103,39 @@ export interface AuditLog {
   action: string;
   timestamp: string;
 }
+
+// Natural numeric sorting for Learning Objectives (TP 1, TP 2, TP 3, ... TP 10)
+export function sortTps(list: LearningObjective[]): LearningObjective[] {
+  return [...list].sort((a, b) => {
+    const textA = (a.kode || a.deskripsi || '').trim();
+    const textB = (b.kode || b.deskripsi || '').trim();
+    const numA = (textA.match(/\d+/) || [])[0];
+    const numB = (textB.match(/\d+/) || [])[0];
+    if (numA && numB && Number(numA) !== Number(numB)) {
+      return Number(numA) - Number(numB);
+    }
+    return textA.localeCompare(textB, 'id', { numeric: true, sensitivity: 'base' });
+  });
+}
+
+// Natural numeric sorting for Material Scopes (LM 1, LM 2, LM 3, ... LM 10)
+export function sortScopes(list: MaterialScope[]): MaterialScope[] {
+  return [...list].sort((a, b) => {
+    const textA = (a.nama || '').trim();
+    const textB = (b.nama || '').trim();
+    const numA = (textA.match(/\d+/) || [])[0];
+    const numB = (textB.match(/\d+/) || [])[0];
+    if (numA && numB && Number(numA) !== Number(numB)) {
+      return Number(numA) - Number(numB);
+    }
+    return textA.localeCompare(textB, 'id', { numeric: true, sensitivity: 'base' });
+  });
+}
+
+// Alphabetical A-Z sorting for Students
+export function sortStudents(list: Student[]): Student[] {
+  return [...list].sort((a, b) => {
+    return (a.nama || '').trim().localeCompare((b.nama || '').trim(), 'id', { sensitivity: 'base' });
+  });
+}
+

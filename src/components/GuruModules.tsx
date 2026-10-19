@@ -7,7 +7,7 @@ import {
 import { 
   LearningObjective, MaterialScope, Student, FormativeScore, 
   SummativeScopeScore, SemesterScore, Class, Subject,
-  AcademicYear, Semester
+  AcademicYear, Semester, sortTps, sortScopes, sortStudents
 } from '../types';
 import { Modal } from './Modal';
 import { 
@@ -230,16 +230,16 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     setActiveScopeId(newScopes[0]?.id || '');
   };
 
-  // Filter students based on active class
+  // Filter students based on active class, sorted alphabetically (A-Z)
   const filteredStudents = useMemo(() => {
     if (!activeClassId) return [];
-    return students.filter(s => s.kelas_id === activeClassId);
+    return sortStudents(students.filter(s => s.kelas_id === activeClassId));
   }, [students, activeClassId]);
 
-  // List of TPs for active class & subject
+  // List of TPs for active class & subject, sorted numerically (TP 1, TP 2, TP 3...)
   const activeTps = useMemo(() => {
     if (!activeClassId || !activeSubjectId) return [];
-    return tps.filter(tp => tp.class_id === activeClassId && tp.subject_id === activeSubjectId);
+    return sortTps(tps.filter(tp => tp.class_id === activeClassId && tp.subject_id === activeSubjectId));
   }, [tps, activeClassId, activeSubjectId]);
 
   // Auto-select active TP when activeTps list changes
@@ -256,10 +256,10 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     }
   }, [activeTps, activeTpId]);
 
-  // List of Scopes for active class & subject
+  // List of Scopes for active class & subject, sorted numerically (LM 1, LM 2, LM 3...)
   const activeScopes = useMemo(() => {
     if (!activeClassId || !activeSubjectId) return [];
-    return scopes.filter(sc => sc.class_id === activeClassId && sc.subject_id === activeSubjectId);
+    return sortScopes(scopes.filter(sc => sc.class_id === activeClassId && sc.subject_id === activeSubjectId));
   }, [scopes, activeClassId, activeSubjectId]);
 
   // Auto-select active Scope when activeScopes list changes
@@ -628,11 +628,11 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     if (!activeClassId || !activeSubjectId) return { headers: { tps: [], scopes: [] }, rows: [] };
     
     const semId = context.semester?.id || 'sem-ganjil';
-    const yrId = context.year?.id || 'th-2025';
+    const yrId = context.year?.id || 'th-1784091890382';
 
-    // Find all TPs and Scopes for active class + subject
-    const subjectTps = tps.filter(t => t.class_id === activeClassId && t.subject_id === activeSubjectId);
-    const subjectScopes = scopes.filter(sc => sc.class_id === activeClassId && sc.subject_id === activeSubjectId);
+    // Find all TPs and Scopes for active class + subject, sorted numerically (TP 1, TP 2, ... LM 1, LM 2, ...)
+    const subjectTps = sortTps(tps.filter(t => t.class_id === activeClassId && t.subject_id === activeSubjectId));
+    const subjectScopes = sortScopes(scopes.filter(sc => sc.class_id === activeClassId && sc.subject_id === activeSubjectId));
 
     // Helper to match semester & academic year across different naming conventions
     const isMatchingContext = (itemSem?: string, itemYr?: string) => {
@@ -644,42 +644,60 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
       const matchYr = !itemYr || 
                       itemYr === yrId || 
                       itemYr === context.year?.nama || 
-                      (yrId.includes('2025') && itemYr.includes('2025'));
+                      (context.year?.nama && itemYr.includes(context.year.nama.substring(0, 4))) ||
+                      (yrId.includes('178409') && (itemYr.includes('178409') || itemYr.includes('2026') || itemYr.includes('2025'))) ||
+                      (yrId.includes('2025') && (itemYr.includes('2025') || itemYr.includes('178409')));
       return matchSem && matchYr;
     };
 
-    // Build O(1) Fast Lookup Maps
-    const formativeMap = new Map<string, number>();
+    // Build O(1) Fast Lookup Maps with timestamp prioritization (newest teacher edits always win)
+    const formativeMap = new Map<string, { val: number; updatedAt: number }>();
     for (let i = 0; i < formativeScores.length; i++) {
       const fs = formativeScores[i];
       if (isMatchingContext(fs.semester, fs.tahun)) {
-        formativeMap.set(`${fs.student_id}_${fs.tp_id}`, fs.nilai);
+        const key = `${fs.student_id}_${fs.tp_id}`;
+        const time = fs.updated_at ? new Date(fs.updated_at).getTime() : 0;
+        const cur = formativeMap.get(key);
+        if (!cur || time >= cur.updatedAt || (cur.val === 0 && fs.nilai > 0)) {
+          formativeMap.set(key, { val: fs.nilai, updatedAt: time });
+        }
       }
     }
 
-    const summativeMap = new Map<string, number>();
+    const summativeMap = new Map<string, { val: number; updatedAt: number }>();
     for (let i = 0; i < summativeScores.length; i++) {
       const ss = summativeScores[i];
       if (isMatchingContext(ss.semester, ss.tahun)) {
-        summativeMap.set(`${ss.student_id}_${ss.lingkup_id}`, ss.nilai);
+        const key = `${ss.student_id}_${ss.lingkup_id}`;
+        const time = ss.updated_at ? new Date(ss.updated_at).getTime() : 0;
+        const cur = summativeMap.get(key);
+        if (!cur || time >= cur.updatedAt || (cur.val === 0 && ss.nilai > 0)) {
+          summativeMap.set(key, { val: ss.nilai, updatedAt: time });
+        }
       }
     }
 
-    const sasMap = new Map<string, number>();
+    const sasMap = new Map<string, { val: number; updatedAt: number }>();
     for (let i = 0; i < semesterScores.length; i++) {
       const ses = semesterScores[i];
       if (ses.subject_id === activeSubjectId && isMatchingContext(ses.semester, ses.tahun)) {
-        sasMap.set(ses.student_id, ses.nilai);
+        const key = ses.student_id;
+        const time = ses.updated_at ? new Date(ses.updated_at).getTime() : 0;
+        const cur = sasMap.get(key);
+        if (!cur || time >= cur.updatedAt || (cur.val === 0 && ses.nilai > 0)) {
+          sasMap.set(key, { val: ses.nilai, updatedAt: time });
+        }
       }
     }
 
     const q = searchQuery.toLowerCase();
-    // Populate rows per student
+    // Populate rows per student (filteredStudents is already sorted alphabetically A-Z)
     const rows = filteredStudents.map((student, index) => {
       // Find formative scores for each TP
       const studentTpsScores = subjectTps.map(tp => {
-        const val = formativeMap.get(`${student.id}_${tp.id}`);
-        return { tpId: tp.id, kode: tp.kode, nilai: val !== undefined ? val : null };
+        const entry = formativeMap.get(`${student.id}_${tp.id}`);
+        const val = entry !== undefined ? entry.val : null;
+        return { tpId: tp.id, kode: tp.kode, nilai: val !== undefined && val !== null ? val : null };
       });
 
       // Calculate formative average
@@ -690,8 +708,9 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
 
       // Find summative scope scores for each scope
       const studentScopeScores = subjectScopes.map(sc => {
-        const val = summativeMap.get(`${student.id}_${sc.id}`);
-        return { scopeId: sc.id, nama: sc.nama, nilai: val !== undefined ? val : null };
+        const entry = summativeMap.get(`${student.id}_${sc.id}`);
+        const val = entry !== undefined ? entry.val : null;
+        return { scopeId: sc.id, nama: sc.nama, nilai: val !== undefined && val !== null ? val : null };
       });
 
       // Calculate summative scope average
@@ -701,7 +720,8 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
         : 0;
 
       // Find Semester Score (SAS)
-      const sasScore = sasMap.has(student.id) ? sasMap.get(student.id)! : null;
+      const sasEntry = sasMap.get(student.id);
+      const sasScore = sasEntry !== undefined ? sasEntry.val : null;
 
       // Final Grade Calculation (Curriculum Merdeka weight standard: 40% Formatif, 40% Sumatif LM, 20% SAS)
       const finalScore = Math.round(
