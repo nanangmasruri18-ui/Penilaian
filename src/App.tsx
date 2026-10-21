@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { 
   Profile, Teacher, Class, Subject, Student, TeacherAssignment, 
+  LearningObjective, MaterialScope,
   AcademicYear, Semester, FormativeScore, SummativeScopeScore, SemesterScore 
 } from './types';
 import { 
@@ -240,6 +241,17 @@ export default function App() {
     const allFormativeScores = db.getFormativeScores();
     const allLearningObjectives = db.getLearningObjectives();
     const context = getActiveContext();
+    const semId = context.semester?.id || '';
+    const yrId = context.year?.id || '';
+
+    // Fast O(1) lookup set for filled formative scores
+    const filledFormativeSet = new Set<string>();
+    for (let i = 0; i < allFormativeScores.length; i++) {
+      const s = allFormativeScores[i];
+      if ((!s.semester || s.semester === semId) && (!s.tahun || s.tahun === yrId)) {
+        filledFormativeSet.add(`${s.student_id}_${s.tp_id}`);
+      }
+    }
 
     // Map through each assigned class-subject combo to calculate grading progress
     const progressList = assignedObj.assignments.map(asg => {
@@ -252,17 +264,11 @@ export default function App() {
       // Total expected grades: students * active TPs
       const totalExpected = classStudents.length * subjectTps.length;
       
-      // Count filled grades in active year & semester
+      // Count filled grades in active year & semester (O(1) lookups)
       let filledCount = 0;
       classStudents.forEach(student => {
         subjectTps.forEach(tp => {
-          const exists = allFormativeScores.some(
-            s => s.student_id === student.id && 
-                 s.tp_id === tp.id && 
-                 s.semester === (context.semester?.id || '') && 
-                 s.tahun === (context.year?.id || '')
-          );
-          if (exists) filledCount++;
+          if (filledFormativeSet.has(`${student.id}_${tp.id}`)) filledCount++;
         });
       });
 
@@ -288,9 +294,9 @@ export default function App() {
       studentsCount: totalTaughtStudents,
       progressList
     };
-  }, [sessionUser, stats, activeTab]); // recompute when base stats, user, or tab changes
+  }, [sessionUser, stats, activeTab]);
 
-  // Compute data for Admin Dashboard: Top 10 students with the highest scores
+  // Compute data for Admin Dashboard: Top 10 students with the highest scores (O(1) Map indexed)
   const topStudentsData = useMemo(() => {
     if (!sessionUser || sessionUser.role !== 'Admin' || activeTab !== 'dashboard') return [];
     const students = db.getStudents();
@@ -306,48 +312,89 @@ export default function App() {
     const semId = context.semester?.id || 'sem-ganjil';
     const yrId = context.year?.id || 'th-2025';
 
+    // Fast indexed Maps for O(1) grade lookup
+    const fMap = new Map<string, number>();
+    for (let i = 0; i < formativeScores.length; i++) {
+      const fs = formativeScores[i];
+      if ((!fs.semester || fs.semester === semId) && (!fs.tahun || fs.tahun === yrId)) {
+        fMap.set(`${fs.student_id}_${fs.tp_id}`, fs.nilai);
+      }
+    }
+
+    const sMap = new Map<string, number>();
+    for (let i = 0; i < summativeScores.length; i++) {
+      const ss = summativeScores[i];
+      if ((!ss.semester || ss.semester === semId) && (!ss.tahun || ss.tahun === yrId)) {
+        sMap.set(`${ss.student_id}_${ss.lingkup_id}`, ss.nilai);
+      }
+    }
+
+    const sasMap = new Map<string, number>();
+    for (let i = 0; i < semesterScores.length; i++) {
+      const ses = semesterScores[i];
+      if ((!ses.semester || ses.semester === semId) && (!ses.tahun || ses.tahun === yrId)) {
+        sasMap.set(`${ses.student_id}_${ses.subject_id}`, ses.nilai);
+      }
+    }
+
+    // Fast indexed Maps for assignments, TPs and Scopes
+    const classSubjectsMap = new Map<string, string[]>();
+    assignments.forEach(a => {
+      const arr = classSubjectsMap.get(a.class_id) || [];
+      if (!arr.includes(a.subject_id)) arr.push(a.subject_id);
+      classSubjectsMap.set(a.class_id, arr);
+    });
+
+    const tpsMap = new Map<string, LearningObjective[]>();
+    tps.forEach(tp => {
+      const k = `${tp.class_id}_${tp.subject_id}`;
+      const arr = tpsMap.get(k) || [];
+      arr.push(tp);
+      tpsMap.set(k, arr);
+    });
+
+    const scopesMap = new Map<string, MaterialScope[]>();
+    scopes.forEach(sc => {
+      const k = `${sc.class_id}_${sc.subject_id}`;
+      const arr = scopesMap.get(k) || [];
+      arr.push(sc);
+      scopesMap.set(k, arr);
+    });
+
+    const classesMap = new Map<string, string>();
+    classes.forEach(c => classesMap.set(c.id, c.nama));
+
     const list = students.map(student => {
-      const cls = classes.find(c => c.id === student.kelas_id);
-      
-      // Find subjects assigned to this class
-      const classSubjectIds = Array.from(new Set(
-        assignments.filter(a => a.class_id === student.kelas_id).map(a => a.subject_id)
-      ));
+      const className = classesMap.get(student.kelas_id) || 'Kelas ?';
+      const classSubjectIds = classSubjectsMap.get(student.kelas_id) || [];
 
       let totalSubjectGradesSum = 0;
       let gradedSubjectsCount = 0;
 
       classSubjectIds.forEach(subId => {
-        // Formative TP scores
-        const subTps = tps.filter(t => t.class_id === student.kelas_id && t.subject_id === subId);
-        const tpScores = subTps
-          .map(tp => {
-            const f = formativeScores.find(fs => fs.student_id === student.id && fs.tp_id === tp.id && fs.semester === semId && fs.tahun === yrId);
-            return f ? f.nilai : null;
-          })
-          .filter(v => v !== null) as number[];
+        const subTps = tpsMap.get(`${student.kelas_id}_${subId}`) || [];
+        const tpScores: number[] = [];
+        subTps.forEach(tp => {
+          const val = fMap.get(`${student.id}_${tp.id}`);
+          if (val !== undefined) tpScores.push(val);
+        });
 
         const formativeAvg = tpScores.length > 0 ? tpScores.reduce((a, b) => a + b, 0) / tpScores.length : 0;
 
-        // Summative scope scores
-        const subScopes = scopes.filter(sc => sc.class_id === student.kelas_id && sc.subject_id === subId);
-        const scopeScores = subScopes
-          .map(sc => {
-            const s = summativeScores.find(ss => ss.student_id === student.id && ss.lingkup_id === sc.id && ss.semester === semId && ss.tahun === yrId);
-            return s ? s.nilai : null;
-          })
-          .filter(v => v !== null) as number[];
+        const subScopes = scopesMap.get(`${student.kelas_id}_${subId}`) || [];
+        const scopeScores: number[] = [];
+        subScopes.forEach(sc => {
+          const val = sMap.get(`${student.id}_${sc.id}`);
+          if (val !== undefined) scopeScores.push(val);
+        });
 
         const scopeAvg = scopeScores.length > 0 ? scopeScores.reduce((a, b) => a + b, 0) / scopeScores.length : 0;
 
-        // SAS score
-        const sasObj = semesterScores.find(s => s.student_id === student.id && s.subject_id === subId && s.semester === semId && s.tahun === yrId);
-        const sasScore = sasObj ? sasObj.nilai : null;
+        const sasScore = sasMap.get(`${student.id}_${subId}`);
 
-        // Only compute if there is at least one grade in this subject (either formative, scope, or SAS)
         const hasFormative = tpScores.length > 0;
         const hasScope = scopeScores.length > 0;
-        const hasSas = sasScore !== null;
+        const hasSas = sasScore !== undefined;
 
         if (hasFormative || hasScope || hasSas) {
           const finalScore = Math.round(
@@ -366,7 +413,7 @@ export default function App() {
         id: student.id,
         name: student.nama,
         nisn: student.nisn,
-        className: cls?.nama || 'Kelas ?',
+        className,
         averageGrade,
         gradedSubjectsCount
       };
@@ -526,7 +573,7 @@ export default function App() {
         
         {/* SIDEBAR KIRI (Desktop & Mobile Drawer - no-print) */}
         <aside className={`
-          fixed md:sticky top-16 left-0 h-[calc(100vh-4rem)] w-64 border-r border-slate-100 dark:border-slate-800/80 bg-white dark:bg-slate-900 transition-transform duration-300 z-30 no-print
+          fixed md:sticky top-16 left-0 h-[calc(100vh-4rem)] w-64 border-r border-slate-100 dark:border-slate-800/80 bg-white dark:bg-slate-900 z-30 no-print
           ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
         `}>
           <div className="p-4 flex flex-col h-full justify-between overflow-y-auto">
@@ -545,7 +592,7 @@ export default function App() {
                       setMobileMenuOpen(false);
                     }}
                     className={`
-                      w-full flex items-center gap-3 px-3.5 py-3 text-sm font-semibold rounded-xl transition-all
+                      w-full flex items-center gap-3 px-3.5 py-3 text-sm font-semibold rounded-xl
                       ${isActive 
                         ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border border-indigo-100/50 dark:border-indigo-900/30' 
                         : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-850 border border-transparent'}

@@ -11,6 +11,11 @@
   body {
     @apply font-sans text-slate-800 bg-slate-50 antialiased selection:bg-indigo-100 selection:text-indigo-900;
   }
+
+  /* Disable sluggish transitions on layout and buttons for instant responsiveness */
+  aside, nav, main, button {
+    transition-duration: 0ms !important;
+  }
 }
 
 /* Print custom styling for A4 Landscape */

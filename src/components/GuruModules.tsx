@@ -203,9 +203,9 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
       setActiveClassId(defaultClassId);
       const defaultSubId = activeSubjectId || (assigned.subjects[0]?.id || '');
       if (defaultSubId) {
-        const matchingTps = tps.filter(tp => tp.class_id === defaultClassId && tp.subject_id === defaultSubId);
+        const matchingTps = sortTps(tps.filter(tp => tp.class_id === defaultClassId && tp.subject_id === defaultSubId));
         setActiveTpId(matchingTps[0]?.id || '');
-        const matchingScopes = scopes.filter(sc => sc.class_id === defaultClassId && sc.subject_id === defaultSubId);
+        const matchingScopes = sortScopes(scopes.filter(sc => sc.class_id === defaultClassId && sc.subject_id === defaultSubId));
         setActiveScopeId(matchingScopes[0]?.id || '');
       }
     }
@@ -216,17 +216,17 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
 
   const handleClassChange = (newClassId: string) => {
     setActiveClassId(newClassId);
-    const newTps = tps.filter(tp => tp.class_id === newClassId && tp.subject_id === activeSubjectId);
+    const newTps = sortTps(tps.filter(tp => tp.class_id === newClassId && tp.subject_id === activeSubjectId));
     setActiveTpId(newTps[0]?.id || '');
-    const newScopes = scopes.filter(sc => sc.class_id === newClassId && sc.subject_id === activeSubjectId);
+    const newScopes = sortScopes(scopes.filter(sc => sc.class_id === newClassId && sc.subject_id === activeSubjectId));
     setActiveScopeId(newScopes[0]?.id || '');
   };
 
   const handleSubjectChange = (newSubjectId: string) => {
     setActiveSubjectId(newSubjectId);
-    const newTps = tps.filter(tp => tp.class_id === activeClassId && tp.subject_id === newSubjectId);
+    const newTps = sortTps(tps.filter(tp => tp.class_id === activeClassId && tp.subject_id === newSubjectId));
     setActiveTpId(newTps[0]?.id || '');
-    const newScopes = scopes.filter(sc => sc.class_id === activeClassId && sc.subject_id === newSubjectId);
+    const newScopes = sortScopes(scopes.filter(sc => sc.class_id === activeClassId && sc.subject_id === newSubjectId));
     setActiveScopeId(newScopes[0]?.id || '');
   };
 

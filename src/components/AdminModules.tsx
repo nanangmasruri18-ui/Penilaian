@@ -168,15 +168,15 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
     onRefreshStats();
   };
 
-  // Auto-sync when switching tabs, changing class/subject, or receiving realtime event
+  // Set default class & subject if empty without blocking tab switching
   useEffect(() => {
-    syncState();
-    if (currentTab === 'rekap' || currentTab === 'logs') {
-      pullFromSupabase({ silent: true }).then(() => {
-        syncState();
-      });
+    if (classes.length > 0 && !activeClassId) {
+      setActiveClassId(classes[0].id);
     }
-  }, [currentTab, activeClassId, activeSubjectId]);
+    if (subjects.length > 0 && !activeSubjectId) {
+      setActiveSubjectId(subjects[0].id);
+    }
+  }, [classes, subjects, activeClassId, activeSubjectId]);
 
   useEffect(() => {
     const handleDbSynced = () => {
@@ -829,32 +829,38 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
   };
 
   // Filter & Search Logic for different lists
+  // Filter & Search Logic for different lists (guarded by active tab to avoid work on tab switch)
   const filteredTeachers = useMemo(() => {
+    if (currentTab !== 'guru') return [];
     return teachers.filter(t => {
       const email = profiles.find(p => p.id === t.user_id)?.email || '';
       return t.nama.toLowerCase().includes(searchQuery.toLowerCase()) || 
              email.toLowerCase().includes(searchQuery.toLowerCase());
     });
-  }, [teachers, profiles, searchQuery]);
+  }, [currentTab, teachers, profiles, searchQuery]);
 
   const filteredStudents = useMemo(() => {
+    if (currentTab !== 'siswa') return [];
     const list = students.filter(s => {
       const matchSearch = s.nama.toLowerCase().includes(searchQuery.toLowerCase()) || s.nisn.includes(searchQuery);
       const matchClass = filterClass === 'all' || s.kelas_id === filterClass;
       return matchSearch && matchClass;
     });
     return sortStudents(list);
-  }, [students, searchQuery, filterClass]);
+  }, [currentTab, students, searchQuery, filterClass]);
 
   const filteredClasses = useMemo(() => {
+    if (currentTab !== 'kelas') return [];
     return classes.filter(c => c.nama.toLowerCase().includes(searchQuery.toLowerCase()));
-  }, [classes, searchQuery]);
+  }, [currentTab, classes, searchQuery]);
 
   const filteredSubjects = useMemo(() => {
+    if (currentTab !== 'subject') return [];
     return subjects.filter(s => s.nama.toLowerCase().includes(searchQuery.toLowerCase()));
-  }, [subjects, searchQuery]);
+  }, [currentTab, subjects, searchQuery]);
 
   const filteredAssignments = useMemo(() => {
+    if (currentTab !== 'assignment') return [];
     return assignments.filter(a => {
       const teacherName = teachers.find(t => t.id === a.teacher_id)?.nama || '';
       const className = classes.find(c => c.id === a.class_id)?.nama || '';
@@ -862,13 +868,70 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
       const text = `${teacherName} ${className} ${subjectName}`.toLowerCase();
       return text.includes(searchQuery.toLowerCase());
     });
-  }, [assignments, teachers, classes, subjects, searchQuery]);
+  }, [currentTab, assignments, teachers, classes, subjects, searchQuery]);
 
-  // --- Teacher Progress Statistics ---
+  // --- Teacher Progress Statistics (Fast O(1) Pre-Indexed) ---
   const teacherStats = useMemo(() => {
     if (currentTab !== 'logs') return [];
     const semId = context.semester?.id || 'sem-ganjil';
     const yrId = context.year?.id || 'th-2025';
+
+    // Build O(1) Fast Lookup Sets once
+    const activeFormativeKeys = new Set<string>();
+    for (let i = 0; i < formativeScores.length; i++) {
+      const fs = formativeScores[i];
+      if ((!fs.semester || fs.semester === semId || fs.semester === context.semester?.nama || (semId.includes('ganjil') && fs.semester.toLowerCase().includes('ganjil'))) &&
+          (!fs.tahun || fs.tahun === yrId || fs.tahun === context.year?.nama || (yrId.includes('2025') && fs.tahun.includes('2025')))) {
+        activeFormativeKeys.add(`${fs.student_id}_${fs.tp_id}`);
+      }
+    }
+
+    const activeSummativeKeys = new Set<string>();
+    for (let i = 0; i < summativeScores.length; i++) {
+      const ss = summativeScores[i];
+      if ((!ss.semester || ss.semester === semId || ss.semester === context.semester?.nama || (semId.includes('ganjil') && ss.semester.toLowerCase().includes('ganjil'))) &&
+          (!ss.tahun || ss.tahun === yrId || ss.tahun === context.year?.nama || (yrId.includes('2025') && ss.tahun.includes('2025')))) {
+        activeSummativeKeys.add(`${ss.student_id}_${ss.lingkup_id}`);
+      }
+    }
+
+    const activeSemesterKeys = new Set<string>();
+    for (let i = 0; i < semesterScores.length; i++) {
+      const ses = semesterScores[i];
+      if ((!ses.semester || ses.semester === semId || ses.semester === context.semester?.nama || (semId.includes('ganjil') && ses.semester.toLowerCase().includes('ganjil'))) &&
+          (!ses.tahun || ses.tahun === yrId || ses.tahun === context.year?.nama || (yrId.includes('2025') && ses.tahun.includes('2025')))) {
+        activeSemesterKeys.add(`${ses.student_id}_${ses.subject_id}`);
+      }
+    }
+
+    const classesMap = new Map<string, string>();
+    classes.forEach(c => classesMap.set(c.id, c.nama));
+
+    const subjectsMap = new Map<string, string>();
+    subjects.forEach(s => subjectsMap.set(s.id, s.nama));
+
+    const tpsByClassSubMap = new Map<string, LearningObjective[]>();
+    tps.forEach(tp => {
+      const k = `${tp.class_id}_${tp.subject_id}`;
+      const arr = tpsByClassSubMap.get(k) || [];
+      arr.push(tp);
+      tpsByClassSubMap.set(k, arr);
+    });
+
+    const scopesByClassSubMap = new Map<string, MaterialScope[]>();
+    scopes.forEach(sc => {
+      const k = `${sc.class_id}_${sc.subject_id}`;
+      const arr = scopesByClassSubMap.get(k) || [];
+      arr.push(sc);
+      scopesByClassSubMap.set(k, arr);
+    });
+
+    const studentsByClassMap = new Map<string, Student[]>();
+    students.forEach(st => {
+      const arr = studentsByClassMap.get(st.kelas_id) || [];
+      arr.push(st);
+      studentsByClassMap.set(st.kelas_id, arr);
+    });
 
     return teachers.map(teacher => {
       const tAssigns = assignments.filter(asg => asg.teacher_id === teacher.id);
@@ -886,63 +949,58 @@ export const AdminModules: React.FC<AdminModulesProps> = ({ currentTab, addToast
       let totalActualSemester = 0;
 
       const assignmentsDetails = tAssigns.map(asg => {
-        const clsName = classes.find(c => c.id === asg.class_id)?.nama || 'Kelas';
-        const subName = subjects.find(s => s.id === asg.subject_id)?.nama || 'Mata Pelajaran';
+        const clsName = classesMap.get(asg.class_id) || 'Kelas';
+        const subName = subjectsMap.get(asg.subject_id) || 'Mata Pelajaran';
         
         // Count TPs
-        const asgTps = tps.filter(tp => tp.class_id === asg.class_id && tp.subject_id === asg.subject_id);
+        const asgTps = tpsByClassSubMap.get(`${asg.class_id}_${asg.subject_id}`) || [];
         const tpsCount = asgTps.length;
         totalTpsCount += tpsCount;
         
         // Count Scopes
-        const asgScopes = scopes.filter(sc => sc.class_id === asg.class_id && sc.subject_id === asg.subject_id);
+        const asgScopes = scopesByClassSubMap.get(`${asg.class_id}_${asg.subject_id}`) || [];
         const scopesCount = asgScopes.length;
         totalScopesCount += scopesCount;
         
         // Students in this class
-        const classStudents = students.filter(s => s.kelas_id === asg.class_id);
+        const classStudents = studentsByClassMap.get(asg.class_id) || [];
         const studentsCount = classStudents.length;
         
         // Expected Formative
         const expFormative = studentsCount * tpsCount;
         totalExpectedFormative += expFormative;
         
-        // Actual Formative
-        const tpIds = new Set(asgTps.map(t => t.id));
-        const studentIds = new Set(classStudents.map(s => s.id));
-        const actFormative = formativeScores.filter(fs => 
-          studentIds.has(fs.student_id) && 
-          tpIds.has(fs.tp_id) &&
-          (!fs.semester || fs.semester === semId || fs.semester === context.semester?.nama || (semId.includes('ganjil') && fs.semester.toLowerCase().includes('ganjil'))) &&
-          (!fs.tahun || fs.tahun === yrId || fs.tahun === context.year?.nama || (yrId.includes('2025') && fs.tahun.includes('2025')))
-        ).length;
+        // Actual Formative (O(1) Set lookup)
+        let actFormative = 0;
+        classStudents.forEach(st => {
+          asgTps.forEach(tp => {
+            if (activeFormativeKeys.has(`${st.id}_${tp.id}`)) actFormative++;
+          });
+        });
         totalActualFormative += actFormative;
         
         // Expected Summative
         const expSummative = studentsCount * scopesCount;
         totalExpectedSummative += expSummative;
         
-        // Actual Summative
-        const scopeIds = new Set(asgScopes.map(sc => sc.id));
-        const actSummative = summativeScores.filter(ss => 
-          studentIds.has(ss.student_id) && 
-          scopeIds.has(ss.lingkup_id) &&
-          (!ss.semester || ss.semester === semId || ss.semester === context.semester?.nama || (semId.includes('ganjil') && ss.semester.toLowerCase().includes('ganjil'))) &&
-          (!ss.tahun || ss.tahun === yrId || ss.tahun === context.year?.nama || (yrId.includes('2025') && ss.tahun.includes('2025')))
-        ).length;
+        // Actual Summative (O(1) Set lookup)
+        let actSummative = 0;
+        classStudents.forEach(st => {
+          asgScopes.forEach(sc => {
+            if (activeSummativeKeys.has(`${st.id}_${sc.id}`)) actSummative++;
+          });
+        });
         totalActualSummative += actSummative;
         
         // Expected Semester
         const expSemester = studentsCount;
         totalExpectedSemester += expSemester;
         
-        // Actual Semester
-        const actSemester = semesterScores.filter(ses => 
-          studentIds.has(ses.student_id) && 
-          ses.subject_id === asg.subject_id &&
-          (!ses.semester || ses.semester === semId || ses.semester === context.semester?.nama || (semId.includes('ganjil') && ses.semester.toLowerCase().includes('ganjil'))) &&
-          (!ses.tahun || ses.tahun === yrId || ses.tahun === context.year?.nama || (yrId.includes('2025') && ses.tahun.includes('2025')))
-        ).length;
+        // Actual Semester (O(1) Set lookup)
+        let actSemester = 0;
+        classStudents.forEach(st => {
+          if (activeSemesterKeys.has(`${st.id}_${asg.subject_id}`)) actSemester++;
+        });
         totalActualSemester += actSemester;
         
         const subTotalExpected = expFormative + expSummative + expSemester;

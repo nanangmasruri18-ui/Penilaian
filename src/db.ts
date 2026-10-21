@@ -48,6 +48,7 @@ export function initializeDatabase(forceReset = false) {
     if (forceReset) {
       logAudit('System', 'Reset database ke kondisi awal.');
     }
+    clearDbMemoryCache();
     return true;
   }
   // Auto-run cleanup of any leftover dummy students from trial tests
@@ -84,13 +85,42 @@ export function cleanupDummyData(): boolean {
   return false;
 }
 
+// In-memory cache for ultra-fast instant reads without repeated JSON parsing
+const dbMemoryCache = new Map<string, any>();
+
+export function clearDbMemoryCache() {
+  dbMemoryCache.clear();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('merdeka_db_synced', () => {
+    dbMemoryCache.clear();
+  });
+  window.addEventListener('storage', (e) => {
+    if (e.key) {
+      dbMemoryCache.delete(e.key);
+    } else {
+      dbMemoryCache.clear();
+    }
+  });
+}
+
 // Low-level read/write
 function get<T>(key: string, defaultValue: T): T {
+  if (dbMemoryCache.has(key)) {
+    return dbMemoryCache.get(key) as T;
+  }
   const item = localStorage.getItem(key);
-  if (!item) return defaultValue;
+  if (!item) {
+    dbMemoryCache.set(key, defaultValue);
+    return defaultValue;
+  }
   try {
-    return JSON.parse(item) as T;
+    const parsed = JSON.parse(item) as T;
+    dbMemoryCache.set(key, parsed);
+    return parsed;
   } catch {
+    dbMemoryCache.set(key, defaultValue);
     return defaultValue;
   }
 }
@@ -100,7 +130,7 @@ function set<T>(key: string, value: T): void {
   let finalValue: any = value;
   
   if (Array.isArray(value)) {
-    const oldItems = (() => {
+    const oldItems: any[] = dbMemoryCache.has(key) ? dbMemoryCache.get(key) : (() => {
       const oldStr = localStorage.getItem(key);
       if (!oldStr) return [];
       try {
@@ -112,11 +142,13 @@ function set<T>(key: string, value: T): void {
     })();
     
     const oldMap = new Map<string, any>();
-    oldItems.forEach((item: any) => {
-      if (item && typeof item === 'object' && 'id' in item) {
-        oldMap.set(item.id, item);
-      }
-    });
+    if (Array.isArray(oldItems)) {
+      oldItems.forEach((item: any) => {
+        if (item && typeof item === 'object' && 'id' in item) {
+          oldMap.set(item.id, item);
+        }
+      });
+    }
     
     const nowIso = new Date().toISOString();
     
@@ -155,6 +187,7 @@ function set<T>(key: string, value: T): void {
     });
   }
 
+  dbMemoryCache.set(key, finalValue);
   localStorage.setItem(key, JSON.stringify(finalValue));
   // Queue asynchronous background auto-save to Supabase
   queueAutoPush(key, finalValue);
