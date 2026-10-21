@@ -106,43 +106,33 @@ export interface AuditLog {
 
 // Natural numeric sorting for Learning Objectives (TP 1, TP 2, TP 3, ... TP 10)
 export function sortTps(list: LearningObjective[]): LearningObjective[] {
-  const extractNum = (str: string): number => {
-    const match = str.match(/(?:tp|tujuan|kompetensi)?\s*(\d+(?:\.\d+)?)/i);
-    return match ? parseFloat(match[1]) : NaN;
+  const normalize = (s: string): string => {
+    return (s || '')
+      .replace(/([a-zA-Z]+)[.\-_ ]*(\d+)/g, '$1 $2')
+      .replace(/\s+/g, ' ')
+      .trim();
   };
 
   return [...list].sort((a, b) => {
-    const codeA = (a.kode || '').trim();
-    const codeB = (b.kode || '').trim();
-    const numA = extractNum(codeA || a.deskripsi || '');
-    const numB = extractNum(codeB || b.deskripsi || '');
-
-    if (!isNaN(numA) && !isNaN(numB) && numA !== numB) {
-      return numA - numB;
-    }
-    const textA = codeA || (a.deskripsi || '').trim();
-    const textB = codeB || (b.deskripsi || '').trim();
+    const textA = normalize(a.kode || a.deskripsi || '');
+    const textB = normalize(b.kode || b.deskripsi || '');
     return textA.localeCompare(textB, 'id', { numeric: true, sensitivity: 'base' });
   });
 }
 
 // Natural numeric sorting for Material Scopes (LM 1, LM 2, LM 3, ... LM 10, Unit 1, Unit 2, Bab 1...)
 export function sortScopes(list: MaterialScope[]): MaterialScope[] {
-  const extractNum = (str: string): number => {
-    const match = str.match(/(?:lm|lingkup|materi|unit|bab|tema)?\s*(\d+(?:\.\d+)?)/i);
-    return match ? parseFloat(match[1]) : NaN;
+  const normalize = (s: string): string => {
+    return (s || '')
+      .replace(/([a-zA-Z]+)[.\-_ ]*(\d+)/g, '$1 $2')
+      .replace(/\s+/g, ' ')
+      .trim();
   };
 
   return [...list].sort((a, b) => {
-    const nameA = (a.nama || '').trim();
-    const nameB = (b.nama || '').trim();
-    const numA = extractNum(nameA);
-    const numB = extractNum(nameB);
-
-    if (!isNaN(numA) && !isNaN(numB) && numA !== numB) {
-      return numA - numB;
-    }
-    return nameA.localeCompare(nameB, 'id', { numeric: true, sensitivity: 'base' });
+    const textA = normalize(a.nama || '');
+    const textB = normalize(b.nama || '');
+    return textA.localeCompare(textB, 'id', { numeric: true, sensitivity: 'base' });
   });
 }
 

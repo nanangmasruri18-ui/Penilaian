@@ -10,9 +10,11 @@ import {
   AcademicYear, Semester, sortTps, sortScopes, sortStudents
 } from '../types';
 import { Modal } from './Modal';
+import * as XLSX from 'xlsx';
 import { 
   BookOpen, Layers, Plus, Edit, Trash2, Save, Sparkles, Check, 
-  FileSpreadsheet, Printer, FileText, Search, User, Lock, Eye, EyeOff, Loader2
+  FileSpreadsheet, Printer, FileText, Search, User, Lock, Eye, EyeOff, Loader2,
+  Upload, Download, FileUp, FileDown, AlertCircle
 } from 'lucide-react';
 
 interface GuruModulesProps {
@@ -78,6 +80,16 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
   const [targetEntity, setTargetEntity] = useState<string>(''); // 'tp' or 'scope'
   const [selectedId, setSelectedId] = useState<string>('');
   const [formData, setFormData] = useState<any>({});
+
+  // Excel Import & Export State
+  const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
+  const [excelImportType, setExcelImportType] = useState<'tp' | 'scope'>('tp');
+  const [excelImportMode, setExcelImportMode] = useState<'append' | 'replace'>('append');
+  const [excelFileName, setExcelFileName] = useState('');
+  const [excelParsedRows, setExcelParsedRows] = useState<any[]>([]);
+  const [excelError, setExcelError] = useState('');
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const excelFileInputRef = useRef<HTMLInputElement>(null);
 
   // Filters for input modules & grade entries
   const [activeClassId, setActiveClassId] = useState<string>('');
@@ -289,6 +301,303 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
     setIsModalOpen(false);
     setFormData({});
     setSelectedId('');
+  };
+
+  // --- Excel Import & Export Handlers ---
+  const handleExportTpExcel = () => {
+    const clsName = assigned.classes.find(c => c.id === activeClassId)?.nama || 'Kelas';
+    const subName = assigned.subjects.find(s => s.id === activeSubjectId)?.nama || 'Mapel';
+    const cleanFileName = `TP_${clsName}_${subName}`.replace(/[/\\?%*:|"<>]/g, '_');
+
+    let exportData: any[] = [];
+    if (activeTps.length > 0) {
+      exportData = activeTps.map((tp, idx) => ({
+        'No': idx + 1,
+        'Kode TP': tp.kode,
+        'Deskripsi Capaian': tp.deskripsi
+      }));
+    } else {
+      exportData = [
+        { 'No': 1, 'Kode TP': 'TP 1', 'Deskripsi Capaian': 'Membaca dan menulis bilangan cacah sampai 10.000 dengan tepat' },
+        { 'No': 2, 'Kode TP': 'TP 2', 'Deskripsi Capaian': 'Membandingkan dan mengurutkan bilangan cacah sampai 10.000' },
+        { 'No': 3, 'Kode TP': 'TP 3', 'Deskripsi Capaian': 'Melakukan operasi penjumlahan dan pengurangan bilangan cacah' }
+      ];
+    }
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    ws['!cols'] = [{ wch: 6 }, { wch: 14 }, { wch: 70 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Data TP');
+    XLSX.writeFile(wb, `${cleanFileName}.xlsx`);
+    addToast('success', 'Excel Diunduh', `Format Excel '${cleanFileName}.xlsx' berhasil diunduh.`);
+  };
+
+  const handleExportScopeExcel = () => {
+    const clsName = assigned.classes.find(c => c.id === activeClassId)?.nama || 'Kelas';
+    const subName = assigned.subjects.find(s => s.id === activeSubjectId)?.nama || 'Mapel';
+    const cleanFileName = `Lingkup_Materi_${clsName}_${subName}`.replace(/[/\\?%*:|"<>]/g, '_');
+
+    let exportData: any[] = [];
+    if (activeScopes.length > 0) {
+      exportData = activeScopes.map((sc, idx) => ({
+        'No': idx + 1,
+        'Nama Lingkup Materi': sc.nama
+      }));
+    } else {
+      exportData = [
+        { 'No': 1, 'Nama Lingkup Materi': 'Bab 1 : Bilangan Cacah sampai 10.000' },
+        { 'No': 2, 'Nama Lingkup Materi': 'Bab 2 : Pecahan Sederhana' },
+        { 'No': 3, 'Nama Lingkup Materi': 'Bab 3 : Pola Gambar dan Pola Bilangan' }
+      ];
+    }
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    ws['!cols'] = [{ wch: 6 }, { wch: 50 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Lingkup Materi');
+    XLSX.writeFile(wb, `${cleanFileName}.xlsx`);
+    addToast('success', 'Excel Diunduh', `Format Excel '${cleanFileName}.xlsx' berhasil diunduh.`);
+  };
+
+  const handleOpenExcelModal = (type: 'tp' | 'scope') => {
+    setExcelImportType(type);
+    setExcelImportMode('append');
+    setExcelFileName('');
+    setExcelParsedRows([]);
+    setExcelError('');
+    setIsExcelModalOpen(true);
+  };
+
+  const processExcelFile = (file: File) => {
+    setExcelFileName(file.name);
+    setExcelError('');
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        if (!firstSheetName) {
+          setExcelError('File Excel tidak memiliki sheet yang valid.');
+          return;
+        }
+
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+
+        if (!rawRows || rawRows.length === 0) {
+          setExcelError('File Excel kosong atau tidak terbaca.');
+          return;
+        }
+
+        if (excelImportType === 'tp') {
+          let headerRowIndex = 0;
+          let codeColIdx = -1;
+          let descColIdx = -1;
+          let noColIdx = -1;
+
+          for (let r = 0; r < Math.min(5, rawRows.length); r++) {
+            const row = rawRows[r];
+            if (!Array.isArray(row)) continue;
+            for (let c = 0; c < row.length; c++) {
+              const val = String(row[c] || '').toLowerCase().trim();
+              if (codeColIdx === -1 && (val.includes('kode') || val.includes('tp') || val === 'kd')) {
+                codeColIdx = c;
+                headerRowIndex = r;
+              }
+              if (descColIdx === -1 && (val.includes('deskripsi') || val.includes('capaian') || val.includes('tujuan') || val.includes('uraian') || val.includes('kompetensi') || val.includes('materi'))) {
+                descColIdx = c;
+                headerRowIndex = r;
+              }
+              if (noColIdx === -1 && (val === 'no' || val === 'no.' || val === 'nomor' || val === 'urut')) {
+                noColIdx = c;
+              }
+            }
+            if (codeColIdx !== -1 && descColIdx !== -1) break;
+          }
+
+          if (codeColIdx === -1 || descColIdx === -1) {
+            const sampleRow = rawRows.find(r => Array.isArray(r) && r.some(cell => String(cell || '').trim() !== '')) || [];
+            if (sampleRow.length <= 2) {
+              codeColIdx = 0;
+              descColIdx = 1;
+              headerRowIndex = /kode|tp|no/i.test(String(sampleRow[0] || '')) ? 0 : -1;
+            } else {
+              codeColIdx = 1;
+              descColIdx = 2;
+              headerRowIndex = /kode|tp|no/i.test(String(sampleRow[0] || '')) ? 0 : -1;
+            }
+          }
+
+          const parsedList: { kode: string; deskripsi: string; valid: boolean }[] = [];
+          for (let r = headerRowIndex + 1; r < rawRows.length; r++) {
+            const row = rawRows[r];
+            if (!Array.isArray(row)) continue;
+
+            let code = String(row[codeColIdx] ?? '').trim();
+            let desc = String(row[descColIdx] ?? '').trim();
+
+            if (!code && !desc) continue;
+
+            if (!code && desc) {
+              code = `TP ${parsedList.length + 1}`;
+            }
+
+            if (/^\d+(\.\d+)?$/.test(code)) {
+              code = `TP ${code}`;
+            }
+
+            const valid = code.length > 0 && desc.length > 0;
+            parsedList.push({ kode: code, deskripsi: desc, valid });
+          }
+
+          if (parsedList.length === 0) {
+            setExcelError('Tidak ditemukan baris data TP yang valid di dalam file Excel.');
+            return;
+          }
+
+          setExcelParsedRows(parsedList);
+        } else {
+          let headerRowIndex = 0;
+          let nameColIdx = -1;
+          let noColIdx = -1;
+
+          for (let r = 0; r < Math.min(5, rawRows.length); r++) {
+            const row = rawRows[r];
+            if (!Array.isArray(row)) continue;
+            for (let c = 0; c < row.length; c++) {
+              const val = String(row[c] || '').toLowerCase().trim();
+              if (nameColIdx === -1 && (val.includes('lingkup') || val.includes('materi') || val.includes('bab') || val.includes('unit') || val.includes('tema') || val.includes('topik') || val.includes('judul'))) {
+                nameColIdx = c;
+                headerRowIndex = r;
+                break;
+              }
+              if (noColIdx === -1 && (val === 'no' || val === 'no.' || val === 'nomor' || val === 'urut')) {
+                noColIdx = c;
+              }
+            }
+            if (nameColIdx !== -1) break;
+          }
+
+          if (nameColIdx === -1) {
+            const sampleRow = rawRows.find(r => Array.isArray(r) && r.some(cell => String(cell || '').trim() !== '')) || [];
+            if (sampleRow.length >= 2 && /^\d+$/.test(String(sampleRow[0] || '').trim())) {
+              nameColIdx = 1;
+              headerRowIndex = 0;
+            } else {
+              nameColIdx = 0;
+              headerRowIndex = /nama|lingkup|materi|no/i.test(String(sampleRow[0] || '')) ? 0 : -1;
+            }
+          }
+
+          const parsedList: { nama: string; valid: boolean }[] = [];
+          for (let r = headerRowIndex + 1; r < rawRows.length; r++) {
+            const row = rawRows[r];
+            if (!Array.isArray(row)) continue;
+
+            let name = String(row[nameColIdx] ?? '').trim();
+            if (!name) continue;
+
+            const valid = name.length > 0;
+            parsedList.push({ nama: name, valid });
+          }
+
+          if (parsedList.length === 0) {
+            setExcelError('Tidak ditemukan data Lingkup Materi yang valid di dalam file Excel.');
+            return;
+          }
+
+          setExcelParsedRows(parsedList);
+        }
+      } catch (err: any) {
+        setExcelError('Gagal membaca file Excel. Pastikan format file adalah .xlsx, .xls, atau .csv');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleCommitExcelImport = () => {
+    if (!activeClassId || !activeSubjectId) {
+      addToast('error', 'Gagal', 'Kelas dan Mata Pelajaran harus dipilih terlebih dahulu.');
+      return;
+    }
+
+    const userName = session?.nama || 'Guru';
+    const clsName = assigned.classes.find(c => c.id === activeClassId)?.nama || 'Kelas';
+    const subName = assigned.subjects.find(s => s.id === activeSubjectId)?.nama || 'Mapel';
+
+    if (excelImportType === 'tp') {
+      const validRows = excelParsedRows.filter(r => r.valid);
+      if (validRows.length === 0) {
+        addToast('error', 'Gagal', 'Tidak ada baris TP yang valid untuk disimpan.');
+        return;
+      }
+
+      const currentTps = db.getLearningObjectives();
+      let baseList = currentTps;
+
+      if (excelImportMode === 'replace') {
+        baseList = currentTps.filter(tp => !(tp.class_id === activeClassId && tp.subject_id === activeSubjectId));
+      }
+
+      const now = Date.now();
+      const newTps: LearningObjective[] = validRows.map((row, idx) => ({
+        id: `tp-${now}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
+        class_id: activeClassId,
+        subject_id: activeSubjectId,
+        kode: row.kode,
+        deskripsi: row.deskripsi
+      }));
+
+      let toAdd = newTps;
+      if (excelImportMode === 'append') {
+        toAdd = newTps.filter(nt => !baseList.some(et => et.class_id === activeClassId && et.subject_id === activeSubjectId && et.kode.toLowerCase() === nt.kode.toLowerCase()));
+      }
+
+      const finalList = sortTps([...baseList, ...toAdd]);
+      db.setLearningObjectives(finalList);
+      setTps(finalList);
+      logAudit(userName, `Impor Excel: Menambahkan ${toAdd.length} TP pada ${clsName} - ${subName}`);
+      addToast('success', 'Impor Excel Berhasil', `${toAdd.length} Tujuan Pembelajaran (TP) berhasil disimpan ke ${clsName} (${subName}).`);
+    } else {
+      const validRows = excelParsedRows.filter(r => r.valid);
+      if (validRows.length === 0) {
+        addToast('error', 'Gagal', 'Tidak ada baris Lingkup Materi yang valid.');
+        return;
+      }
+
+      const currentScopes = db.getMaterialScopes();
+      let baseList = currentScopes;
+
+      if (excelImportMode === 'replace') {
+        baseList = currentScopes.filter(sc => !(sc.class_id === activeClassId && sc.subject_id === activeSubjectId));
+      }
+
+      const now = Date.now();
+      const newScopes: MaterialScope[] = validRows.map((row, idx) => ({
+        id: `sc-${now}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
+        class_id: activeClassId,
+        subject_id: activeSubjectId,
+        nama: row.nama
+      }));
+
+      let toAdd = newScopes;
+      if (excelImportMode === 'append') {
+        toAdd = newScopes.filter(ns => !baseList.some(es => es.class_id === activeClassId && es.subject_id === activeSubjectId && es.nama.toLowerCase() === ns.nama.toLowerCase()));
+      }
+
+      const finalList = sortScopes([...baseList, ...toAdd]);
+      db.setMaterialScopes(finalList);
+      setScopes(finalList);
+      logAudit(userName, `Impor Excel: Menambahkan ${toAdd.length} Lingkup Materi pada ${clsName} - ${subName}`);
+      addToast('success', 'Impor Excel Berhasil', `${toAdd.length} Lingkup Materi berhasil disimpan ke ${clsName} (${subName}).`);
+    }
+
+    syncState();
+    if (onRefreshStats) onRefreshStats();
+    setIsExcelModalOpen(false);
+    setExcelParsedRows([]);
   };
 
   // Submit CRUD for TP & Material Scopes
@@ -893,23 +1202,65 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
 
           <div className="flex gap-2 w-full md:w-auto justify-end">
             {currentTab === 'tp' && (
-              <button
-                onClick={() => openModal('add', 'tp', '', { class_id: activeClassId, subject_id: activeSubjectId })}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-all rounded-xl shadow-md"
-              >
-                <Plus className="w-4 h-4" />
-                Tambah TP
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportTpExcel}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-xl cursor-pointer"
+                  title="Unduh data TP / format template Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  Unduh Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenExcelModal('tp')}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 rounded-xl cursor-pointer"
+                  title="Upload data TP dari file Excel (.xlsx / .csv)"
+                >
+                  <FileUp className="w-4 h-4 text-indigo-600" />
+                  Upload Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openModal('add', 'tp', '', { class_id: activeClassId, subject_id: activeSubjectId })}
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  Tambah TP
+                </button>
+              </div>
             )}
 
             {currentTab === 'scope' && (
-              <button
-                onClick={() => openModal('add', 'scope', '', { class_id: activeClassId, subject_id: activeSubjectId })}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-all rounded-xl shadow-md"
-              >
-                <Plus className="w-4 h-4" />
-                Tambah Lingkup Materi
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportScopeExcel}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-xl cursor-pointer"
+                  title="Unduh data Lingkup Materi / format template Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  Unduh Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenExcelModal('scope')}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 rounded-xl cursor-pointer"
+                  title="Upload data Lingkup Materi dari file Excel (.xlsx / .csv)"
+                >
+                  <FileUp className="w-4 h-4 text-indigo-600" />
+                  Upload Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openModal('add', 'scope', '', { class_id: activeClassId, subject_id: activeSubjectId })}
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  Tambah Lingkup Materi
+                </button>
+              </div>
             )}
 
             {currentTab === 'sas' && (
@@ -948,11 +1299,48 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
       {/* --- TP MODULE VIEW --- */}
       {currentTab === 'tp' && (
         <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-          <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+          <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50/40">
             <div>
-              <h3 className="text-base font-bold text-slate-800">Tujuan Pembelajaran (TP)</h3>
-              <p className="text-xs text-slate-500 mt-1">Daftar capaian minimal peserta didik untuk setiap materi dasar.</p>
+              <div className="flex items-center gap-2.5">
+                <h3 className="text-base font-bold text-slate-800">Tujuan Pembelajaran (TP)</h3>
+                <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 font-mono">
+                  {activeTps.length} TP
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Daftar capaian untuk {assigned.classes.find(c => c.id === activeClassId)?.nama || 'Kelas'} • {assigned.subjects.find(s => s.id === activeSubjectId)?.nama || 'Mapel'}.
+              </p>
             </div>
+            {activeTps.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={handleExportTpExcel}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-xl cursor-pointer transition-colors shadow-xs"
+                  title="Unduh daftar TP saat ini ke file Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  Unduh Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenExcelModal('tp')}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 rounded-xl cursor-pointer transition-colors shadow-xs"
+                  title="Upload data TP dari berkas Excel (.xlsx / .csv)"
+                >
+                  <FileUp className="w-4 h-4 text-indigo-600" />
+                  Upload Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openModal('add', 'tp', '', { class_id: activeClassId, subject_id: activeSubjectId })}
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs cursor-pointer transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Tambah TP
+                </button>
+              </div>
+            )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -966,8 +1354,42 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
               <tbody className="divide-y divide-slate-100">
                 {activeTps.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="text-center py-10 text-slate-400 text-sm">
-                      Mata pelajaran ini belum memiliki Tujuan Pembelajaran (TP). Sila tambah TP baru.
+                    <td colSpan={3} className="text-center py-12 text-slate-400">
+                      <div className="flex flex-col items-center justify-center max-w-md mx-auto">
+                        <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 mb-3">
+                          <BookOpen className="w-6 h-6" />
+                        </div>
+                        <p className="text-sm font-bold text-slate-800">Belum Ada Tujuan Pembelajaran (TP)</p>
+                        <p className="text-xs text-slate-500 mt-1 mb-4 text-center">
+                          Input Tujuan Pembelajaran secara manual atau unggah berkas Excel untuk pengisian massal yang cepat.
+                        </p>
+                        <div className="flex flex-wrap gap-2 justify-center">
+                          <button
+                            type="button"
+                            onClick={handleExportTpExcel}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-xl cursor-pointer"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            Unduh Format Excel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenExcelModal('tp')}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 rounded-xl cursor-pointer"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            Upload File Excel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openModal('add', 'tp', '', { class_id: activeClassId, subject_id: activeSubjectId })}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Tambah Manual
+                          </button>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -979,13 +1401,13 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
                         <div className="flex items-center justify-end gap-1.5">
                           <button
                             onClick={() => openModal('edit', 'tp', tp.id, { class_id: tp.class_id, subject_id: tp.subject_id, kode: tp.kode, deskripsi: tp.deskripsi })}
-                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all rounded-xl"
+                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all rounded-xl cursor-pointer"
                           >
                             <Edit className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => openModal('delete', 'tp', tp.id)}
-                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all rounded-xl"
+                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all rounded-xl cursor-pointer"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1003,11 +1425,48 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
       {/* --- LINGKUP MATERI VIEW --- */}
       {currentTab === 'scope' && (
         <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-          <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+          <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50/40">
             <div>
-              <h3 className="text-base font-bold text-slate-800">Daftar Lingkup Materi</h3>
-              <p className="text-xs text-slate-500 mt-1">Pembagian bab/materi pokok kurikulum merdeka untuk penilaian sumatif.</p>
+              <div className="flex items-center gap-2.5">
+                <h3 className="text-base font-bold text-slate-800">Daftar Lingkup Materi</h3>
+                <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 font-mono">
+                  {activeScopes.length} Lingkup Materi
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Pembagian bab/materi pokok untuk {assigned.classes.find(c => c.id === activeClassId)?.nama || 'Kelas'} • {assigned.subjects.find(s => s.id === activeSubjectId)?.nama || 'Mapel'}.
+              </p>
             </div>
+            {activeScopes.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={handleExportScopeExcel}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-xl cursor-pointer transition-colors shadow-xs"
+                  title="Unduh data Lingkup Materi saat ini ke file Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  Unduh Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenExcelModal('scope')}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 rounded-xl cursor-pointer transition-colors shadow-xs"
+                  title="Upload data Lingkup Materi dari berkas Excel (.xlsx / .csv)"
+                >
+                  <FileUp className="w-4 h-4 text-indigo-600" />
+                  Upload Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openModal('add', 'scope', '', { class_id: activeClassId, subject_id: activeSubjectId })}
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs cursor-pointer transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Tambah Lingkup Materi
+                </button>
+              </div>
+            )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -1020,8 +1479,42 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
               <tbody className="divide-y divide-slate-100">
                 {activeScopes.length === 0 ? (
                   <tr>
-                    <td colSpan={2} className="text-center py-10 text-slate-400 text-sm">
-                      Mata pelajaran ini belum memiliki Lingkup Materi. Sila tambah lingkup materi baru.
+                    <td colSpan={2} className="text-center py-12 text-slate-400">
+                      <div className="flex flex-col items-center justify-center max-w-md mx-auto">
+                        <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 mb-3">
+                          <Layers className="w-6 h-6" />
+                        </div>
+                        <p className="text-sm font-bold text-slate-800">Belum Ada Lingkup Materi</p>
+                        <p className="text-xs text-slate-500 mt-1 mb-4 text-center">
+                          Input judul bab materi secara manual atau unggah berkas Excel untuk pengisian massal yang cepat.
+                        </p>
+                        <div className="flex flex-wrap gap-2 justify-center">
+                          <button
+                            type="button"
+                            onClick={handleExportScopeExcel}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-xl cursor-pointer"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            Unduh Format Excel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenExcelModal('scope')}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 rounded-xl cursor-pointer"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            Upload File Excel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openModal('add', 'scope', '', { class_id: activeClassId, subject_id: activeSubjectId })}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Tambah Manual
+                          </button>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -1841,6 +2334,199 @@ export const GuruModules: React.FC<GuruModulesProps> = ({ currentTab, addToast, 
             </div>
           </form>
         )}
+      </Modal>
+
+      {/* --- EXCEL IMPORT MODAL (FOR TP & LINGKUP MATERI) --- */}
+      <Modal
+        isOpen={isExcelModalOpen}
+        onClose={() => {
+          setIsExcelModalOpen(false);
+          setExcelParsedRows([]);
+          setExcelFileName('');
+          setExcelError('');
+        }}
+        title={`Upload Data ${excelImportType === 'tp' ? 'Tujuan Pembelajaran (TP)' : 'Lingkup Materi'} dari Excel`}
+        maxWidth="lg"
+      >
+        <div className="space-y-4">
+          {/* Active Class & Subject Target Indicator */}
+          <div className="p-3 bg-indigo-50/70 rounded-xl border border-indigo-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs">
+            <div>
+              <span className="text-slate-500">Target Impor: </span>
+              <strong className="text-indigo-900 font-semibold">
+                {assigned.classes.find(c => c.id === activeClassId)?.nama || 'Kelas'} • {assigned.subjects.find(s => s.id === activeSubjectId)?.nama || 'Mapel'}
+              </strong>
+            </div>
+            <button
+              type="button"
+              onClick={excelImportType === 'tp' ? handleExportTpExcel : handleExportScopeExcel}
+              className="text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1 underline cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Unduh Contoh Format Excel
+            </button>
+          </div>
+
+          {/* Drag & Drop File Upload Area */}
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDraggingFile(true);
+            }}
+            onDragLeave={() => setIsDraggingFile(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDraggingFile(false);
+              if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                processExcelFile(e.dataTransfer.files[0]);
+              }
+            }}
+            onClick={() => excelFileInputRef.current?.click()}
+            className={`
+              p-6 border-2 border-dashed rounded-2xl text-center cursor-pointer transition-colors
+              ${isDraggingFile ? 'border-indigo-500 bg-indigo-50/50' : 'border-slate-200 hover:border-indigo-400 bg-slate-50/50'}
+            `}
+          >
+            <input
+              ref={excelFileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  processExcelFile(e.target.files[0]);
+                }
+              }}
+            />
+            <div className="flex flex-col items-center">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-100/60 text-indigo-600 flex items-center justify-center mb-2">
+                <FileSpreadsheet className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-bold text-slate-800">
+                {excelFileName ? excelFileName : 'Pilih atau Seret Berkas Excel ke Sini'}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                Mendukung format Microsoft Excel (<strong>.xlsx</strong>, <strong>.xls</strong>) atau <strong>.csv</strong>
+              </p>
+            </div>
+          </div>
+
+          {/* Error Notice */}
+          {excelError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+              <span>{excelError}</span>
+            </div>
+          )}
+
+          {/* Import Mode Selection */}
+          {excelParsedRows.length > 0 && (
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Metode Penyimpanan Data:
+              </label>
+              <div className="flex flex-col sm:flex-row gap-3 text-xs">
+                <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
+                  <input
+                    type="radio"
+                    name="importMode"
+                    value="append"
+                    checked={excelImportMode === 'append'}
+                    onChange={() => setExcelImportMode('append')}
+                    className="text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span>Tambahkan ke data yang sudah ada (Append)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
+                  <input
+                    type="radio"
+                    name="importMode"
+                    value="replace"
+                    checked={excelImportMode === 'replace'}
+                    onChange={() => setExcelImportMode('replace')}
+                    className="text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span>Gantikan seluruh data untuk kelas & mapel ini (Replace)</span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* Parsed Preview Table */}
+          {excelParsedRows.length > 0 && (
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Pratinjau Data Terdeteksi ({excelParsedRows.filter(r => r.valid).length} baris valid)
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  Pastikan kolom sesuai sebelum disimpan
+                </span>
+              </div>
+              <div className="border border-slate-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-100 text-slate-600 sticky top-0 font-semibold border-b border-slate-200">
+                    {excelImportType === 'tp' ? (
+                      <tr>
+                        <th className="py-2 px-3 w-12 text-center">No</th>
+                        <th className="py-2 px-3 w-24">Kode TP</th>
+                        <th className="py-2 px-3">Deskripsi Capaian</th>
+                      </tr>
+                    ) : (
+                      <tr>
+                        <th className="py-2 px-3 w-12 text-center">No</th>
+                        <th className="py-2 px-3">Nama Lingkup Materi / Bab</th>
+                      </tr>
+                    )}
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {excelImportType === 'tp' ? (
+                      excelParsedRows.map((row, idx) => (
+                        <tr key={idx} className={row.valid ? 'hover:bg-slate-50/50' : 'bg-rose-50/50 text-rose-600'}>
+                          <td className="py-2 px-3 text-center font-mono text-slate-400">{idx + 1}</td>
+                          <td className="py-2 px-3 font-bold font-mono text-indigo-600">{row.kode || '-'}</td>
+                          <td className="py-2 px-3 text-slate-700 leading-relaxed">{row.deskripsi || '(Kosong)'}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      excelParsedRows.map((row, idx) => (
+                        <tr key={idx} className={row.valid ? 'hover:bg-slate-50/50' : 'bg-rose-50/50 text-rose-600'}>
+                          <td className="py-2 px-3 text-center font-mono text-slate-400">{idx + 1}</td>
+                          <td className="py-2 px-3 font-semibold text-slate-800">{row.nama || '(Kosong)'}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Actions */}
+          <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => {
+                setIsExcelModalOpen(false);
+                setExcelParsedRows([]);
+                setExcelFileName('');
+                setExcelError('');
+              }}
+              className="px-4 py-2 border border-slate-200 text-slate-600 font-semibold rounded-xl text-sm hover:bg-slate-50 cursor-pointer"
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              disabled={excelParsedRows.filter(r => r.valid).length === 0}
+              onClick={handleCommitExcelImport}
+              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl text-sm shadow-md cursor-pointer flex items-center gap-1.5"
+            >
+              <Check className="w-4 h-4" />
+              Simpan ke Database ({excelParsedRows.filter(r => r.valid).length})
+            </button>
+          </div>
+        </div>
       </Modal>
 
     </div>
